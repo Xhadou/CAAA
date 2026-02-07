@@ -28,7 +28,7 @@ class FaultGenerator:
         sequence_length: int = 60,
         seed: int = 42,
     ) -> None:
-        """Initialise the fault generator.
+        """Initialize the fault generator.
 
         Args:
             n_services: Number of microservices.

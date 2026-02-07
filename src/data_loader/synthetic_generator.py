@@ -32,7 +32,6 @@ class SyntheticMetricsGenerator:
     Attributes:
         n_services: Number of services to generate metrics for.
         sequence_length: Number of time steps per service.
-        rng: NumPy random number generator.
     """
 
     SERVICE_NAMES = SERVICE_NAMES
@@ -43,7 +42,7 @@ class SyntheticMetricsGenerator:
         sequence_length: int = 60,
         seed: int = 42,
     ) -> None:
-        """Initialise the generator.
+        """Initialize the generator.
 
         Args:
             n_services: Number of microservices.
