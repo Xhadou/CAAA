@@ -108,12 +108,13 @@ def main():
         print("BASELINE COMPARISON")
         print("=" * 50)
         print(f"{'':16s}{'CAAA':>8s}{'Baseline':>12s}{'Naive':>8s}")
-        print(f"{'Accuracy:':<16s}{caaa_metrics['accuracy']:>8.2f}{bl_metrics['accuracy']:>12.2f}{'0.50':>8s}")
-        print(f"{'FP Rate:':<16s}{caaa_metrics['fp_rate']:>8.2f}{bl_metrics['fp_rate']:>12.2f}{'1.00':>8s}")
-        print(f"{'Fault Recall:':<16s}{caaa_metrics['fault_recall']:>8.2f}{bl_metrics['fault_recall']:>12.2f}{'1.00':>8s}")
+        print(f"{'Accuracy:':<16s}{caaa_metrics['accuracy']:>8.2f}{bl_metrics['accuracy']:>12.2f}{naive_metrics['accuracy']:>8.2f}")
+        print(f"{'FP Rate:':<16s}{caaa_metrics['fp_rate']:>8.2f}{bl_metrics['fp_rate']:>12.2f}{naive_metrics['fp_rate']:>8.2f}")
+        print(f"{'Fault Recall:':<16s}{caaa_metrics['fault_recall']:>8.2f}{bl_metrics['fault_recall']:>12.2f}{naive_metrics['fault_recall']:>8.2f}")
         caaa_fpr = caaa_metrics.get("fp_reduction", 0) * 100
         bl_fpr = bl_metrics.get("fp_reduction", 0) * 100
-        print(f"{'FP Reduction:':<16s}{caaa_fpr:>7.1f}%{bl_fpr:>11.1f}%{'0.0%':>8s}")
+        naive_fpr = naive_metrics.get("fp_reduction", 0) * 100
+        print(f"{'FP Reduction:':<16s}{caaa_fpr:>7.1f}%{bl_fpr:>11.1f}%{naive_fpr:>7.1f}%")
         print("=" * 50)
 
 
