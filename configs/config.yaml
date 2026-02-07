@@ -1,0 +1,46 @@
+# CAAA Configuration
+
+data:
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+  synthetic_path: "data/synthetic"
+  systems: ["online-boutique", "sock-shop", "train-ticket"]
+  n_services: 12
+  sequence_length: 60
+
+features:
+  window_size: 60
+  stride: 10
+  n_workload: 6
+  n_behavioral: 6
+  n_context: 5
+
+model:
+  temporal_encoder:
+    hidden_dim: 64
+    num_layers: 2
+    dropout: 0.1
+  context_module:
+    context_dim: 5
+    hidden_dim: 32
+  classifier:
+    hidden_dim: 64
+    n_classes: 2
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.001
+  early_stopping_patience: 10
+  test_split: 0.2
+  val_split: 0.1
+
+evaluation:
+  metrics: ["accuracy", "precision", "recall", "f1", "confusion_matrix"]
+  fp_reduction_target: 0.40
+  fault_recall_target: 0.90
+
+output:
+  model_path: "models/final"
+  results_path: "outputs/results"
+  figures_path: "outputs/figures"
