@@ -139,11 +139,15 @@ class AnomalyDetector:
             batch_size: Mini-batch size.
             learning_rate: Adam learning rate.
         """
-        all_data = []
-        for i, m in enumerate(train_metrics):
-            all_data.append(self._preprocess(m, fit_scaler=(i == 0)))
+        # Fit scaler on concatenated data for consistent normalisation
+        raw_parts = []
+        for m in train_metrics:
+            numeric = m.select_dtypes(include=[np.number])
+            raw_parts.append(np.nan_to_num(numeric.values, nan=0.0))
+        combined_raw = np.vstack(raw_parts)
+        self.scaler.fit(combined_raw)
 
-        combined = np.vstack(all_data)
+        combined = self.scaler.transform(combined_raw)
         n_features = combined.shape[1]
 
         self.model = LSTMAutoencoder(

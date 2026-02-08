@@ -88,7 +88,7 @@ class EventCalendar:
 class ContextFeatureExtractor:
     """Extract features based on external context."""
 
-    HIGH_TRAFFIC_HOURS = list(range(9, 21))  # 9 AM – 8 PM
+    HIGH_TRAFFIC_HOURS = list(range(9, 21))  # 9 AM – 9 PM
 
     def __init__(self, event_calendar: Optional[EventCalendar] = None) -> None:
         self.calendar = event_calendar or EventCalendar()

@@ -105,7 +105,7 @@ def run_pipeline(
     # ------------------------------------------------------------------
     print(f"\n[3/5] Training {model_type} model...")
     if model_type == "caaa":
-        model = CAAAModel(input_dim=36)
+        model = CAAAModel(input_dim=X_train.shape[1])
         trainer = CAAATrainer(model, learning_rate=learning_rate, device="cpu")
         trainer.train(
             X_train, y_train, X_val=X_test, y_val=y_test,

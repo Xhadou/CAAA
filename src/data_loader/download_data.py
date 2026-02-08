@@ -63,7 +63,7 @@ def download_rcaeval_dataset(
     """Download RCAEval dataset.
 
     Args:
-        dataset: ``"RE1"``, ``"RE2"``, or ``"RE3"``.
+        dataset: ``"RE1"`` or ``"RE2"``.
         systems: List of systems to download. Default: all available.
         data_dir: Directory to save data.
     """
