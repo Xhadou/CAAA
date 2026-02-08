@@ -1,6 +1,7 @@
 """Trainer for the CAAA model."""
 
 import logging
+import os
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -255,6 +256,38 @@ class CAAATrainer:
             logits = self.model(X_t)
             proba = torch.softmax(logits, dim=-1)
         return proba.cpu().numpy()
+
+    def save_model(self, path: str) -> None:
+        """Save model state dict, optimizer state, and training config.
+
+        Args:
+            path: File path to save the checkpoint (.pt file).
+        """
+        dir_name = os.path.dirname(path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "model_config": {
+                "input_dim": self.model.input_dim,
+                "hidden_dim": self.model.hidden_dim,
+                "n_classes": self.model.classifier[-1].out_features,
+            },
+        }
+        torch.save(checkpoint, path)
+        logger.info("Model saved to %s", path)
+
+    def load_model(self, path: str) -> None:
+        """Load model from checkpoint.
+
+        Args:
+            path: File path to the checkpoint (.pt file).
+        """
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        logger.info("Model loaded from %s", path)
 
     def _compute_loss(self, X_t: torch.Tensor, y_t: torch.Tensor) -> float:
         """Computes loss on given tensors.

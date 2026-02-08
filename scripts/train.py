@@ -92,6 +92,12 @@ def main():
     print(f"Fault Recall:       >{caaa_metrics.get('fault_recall', 0):.2f}")
     print("=" * 50)
 
+    # Save model
+    os.makedirs("models/final", exist_ok=True)
+    save_path = "models/final/caaa_model.pt"
+    trainer.save_model(save_path)
+    print(f"Model saved to: {save_path}")
+
     # Baseline comparison
     if args.baseline:
         print()
