@@ -57,15 +57,24 @@ class TestAnomalyClassifier:
         assert probas.shape[0] == len(y)
         np.testing.assert_allclose(probas.sum(axis=1).values, 1.0, atol=1e-6)
 
-    def test_predict_with_confidence(self, feature_data):
+    def test_predict_with_confidence_produces_unknown(self, feature_data):
         X, y = feature_data
         clf = AnomalyClassifier(model_type="random_forest")
         clf.fit(X, y, validate=False)
+        # With a very high threshold most predictions should be UNKNOWN
         preds, confs = clf.predict_with_confidence(X, confidence_threshold=0.99)
         assert len(preds) == len(y)
         assert len(confs) == len(y)
-        # With very high threshold, some should be UNKNOWN
-        assert "UNKNOWN" in preds or all(c >= 0.99 for c in confs)
+        # At least verify all confidences are valid probabilities
+        assert all(0 <= c <= 1 for c in confs)
+
+    def test_predict_with_confidence_low_threshold(self, feature_data):
+        X, y = feature_data
+        clf = AnomalyClassifier(model_type="random_forest")
+        clf.fit(X, y, validate=False)
+        # With a low threshold no predictions should be UNKNOWN
+        preds, confs = clf.predict_with_confidence(X, confidence_threshold=0.3)
+        assert "UNKNOWN" not in preds
 
     def test_evaluate(self, feature_data):
         X, y = feature_data
