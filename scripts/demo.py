@@ -6,6 +6,7 @@ import sys
 import os
 
 import numpy as np
+import yaml
 import torch
 from sklearn.model_selection import train_test_split
 
@@ -24,7 +25,16 @@ def main():
     parser.add_argument("--n-load", type=int, default=10)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--config", type=str, default=None, help="Path to config YAML file")
     args = parser.parse_args()
+
+    # Load config if provided
+    if args.config:
+        with open(args.config, "r") as f:
+            config = yaml.safe_load(f)
+        training_cfg = config.get("training", {})
+        if args.epochs == 30:
+            args.epochs = training_cfg.get("epochs", args.epochs)
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
