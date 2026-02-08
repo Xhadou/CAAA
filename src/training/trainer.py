@@ -1,15 +1,21 @@
 """Trainer for the CAAA model."""
 
 import logging
-from typing import Dict, List, Optional
+import os
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 
 from src.models import CAAAModel
+from src.training.losses import ContextConsistencyLoss
 
 logger = logging.getLogger(__name__)
+
+# Column indices for context features within the full feature vector
+_CONTEXT_START = 12
+_CONTEXT_END = 17
 
 
 class CAAATrainer:
@@ -31,6 +37,7 @@ class CAAATrainer:
         learning_rate: float = 0.001,
         weight_decay: float = 1e-4,
         device: str = "cpu",
+        use_context_loss: bool = True,
     ) -> None:
         """Initializes the CAAATrainer.
 
@@ -39,13 +46,18 @@ class CAAATrainer:
             learning_rate: Learning rate for the Adam optimizer.
             weight_decay: Weight decay (L2 regularization) for the optimizer.
             device: Device to run computations on ('cpu' or 'cuda').
+            use_context_loss: Whether to use ContextConsistencyLoss.
         """
         self.device = device
         self.model = model.to(self.device)
+        self.use_context_loss = use_context_loss
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=learning_rate, weight_decay=weight_decay
         )
-        self.criterion = nn.CrossEntropyLoss()
+        if self.use_context_loss:
+            self.criterion = ContextConsistencyLoss()
+        else:
+            self.criterion = nn.CrossEntropyLoss()
 
     def train(
         self,
@@ -81,6 +93,10 @@ class CAAATrainer:
             y_val_t = torch.tensor(y_val, dtype=torch.long, device=self.device)
 
         history: Dict[str, List[float]] = {"train_loss": []}
+        if self.use_context_loss:
+            history["cls_loss"] = []
+            history["consistency_loss"] = []
+            history["calibration_loss"] = []
         if has_val:
             history["val_loss"] = []
 
@@ -92,6 +108,9 @@ class CAAATrainer:
         for epoch in range(epochs):
             self.model.train()
             epoch_loss = 0.0
+            epoch_cls_loss = 0.0
+            epoch_consistency_loss = 0.0
+            epoch_calibration_loss = 0.0
             n_batches = 0
 
             indices = torch.randperm(n_samples, device=self.device)
@@ -102,15 +121,31 @@ class CAAATrainer:
 
                 self.optimizer.zero_grad()
                 logits = self.model(X_batch)
-                loss = self.criterion(logits, y_batch)
+                if self.use_context_loss:
+                    context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
+                    loss, components = self.criterion(logits, y_batch, context)
+                else:
+                    loss = self.criterion(logits, y_batch)
                 loss.backward()
                 self.optimizer.step()
 
                 epoch_loss += loss.item()
+                if self.use_context_loss:
+                    epoch_cls_loss += components["cls_loss"]
+                    epoch_consistency_loss += components["consistency_loss"]
+                    epoch_calibration_loss += components["calibration_loss"]
                 n_batches += 1
 
             avg_train_loss = epoch_loss / max(n_batches, 1)
             history["train_loss"].append(avg_train_loss)
+            if self.use_context_loss:
+                history["cls_loss"].append(epoch_cls_loss / max(n_batches, 1))
+                history["consistency_loss"].append(
+                    epoch_consistency_loss / max(n_batches, 1)
+                )
+                history["calibration_loss"].append(
+                    epoch_calibration_loss / max(n_batches, 1)
+                )
 
             if has_val:
                 val_loss = self._compute_loss(X_val_t, y_val_t)
@@ -159,7 +194,12 @@ class CAAATrainer:
         self.model.eval()
         with torch.no_grad():
             logits = self.model(X_t)
-            loss = self.criterion(logits, y_t).item()
+            if self.use_context_loss:
+                context = X_t[:, _CONTEXT_START:_CONTEXT_END]
+                loss_tensor, _ = self.criterion(logits, y_t, context)
+                loss = loss_tensor.item()
+            else:
+                loss = self.criterion(logits, y_t).item()
             preds = torch.argmax(logits, dim=-1)
             accuracy = (preds == y_t).float().mean().item()
 
@@ -180,6 +220,27 @@ class CAAATrainer:
             preds = self.model.predict(X_t)
         return preds.cpu().numpy()
 
+    def predict_with_confidence(
+        self, X: np.ndarray, confidence_threshold: float = 0.6
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Returns predictions with UNKNOWN class for low-confidence cases.
+
+        Args:
+            X: Feature array of shape (n_samples, input_dim).
+            confidence_threshold: Minimum probability threshold. Below this,
+                predictions become class 2 (UNKNOWN).
+
+        Returns:
+            Tuple of (predictions, confidences) as numpy arrays.
+        """
+        X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
+        self.model.eval()
+        with torch.no_grad():
+            preds, confs = self.model.predict_with_confidence(
+                X_t, confidence_threshold=confidence_threshold
+            )
+        return preds.cpu().numpy(), confs.cpu().numpy()
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Returns predicted probabilities.
 
@@ -196,6 +257,38 @@ class CAAATrainer:
             proba = torch.softmax(logits, dim=-1)
         return proba.cpu().numpy()
 
+    def save_model(self, path: str) -> None:
+        """Save model state dict, optimizer state, and training config.
+
+        Args:
+            path: File path to save the checkpoint (.pt file).
+        """
+        dir_name = os.path.dirname(path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "model_config": {
+                "input_dim": self.model.input_dim,
+                "hidden_dim": self.model.hidden_dim,
+                "n_classes": self.model.classifier[-1].out_features,
+            },
+        }
+        torch.save(checkpoint, path)
+        logger.info("Model saved to %s", path)
+
+    def load_model(self, path: str) -> None:
+        """Load model from checkpoint.
+
+        Args:
+            path: File path to the checkpoint (.pt file).
+        """
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        logger.info("Model loaded from %s", path)
+
     def _compute_loss(self, X_t: torch.Tensor, y_t: torch.Tensor) -> float:
         """Computes loss on given tensors.
 
@@ -209,5 +302,9 @@ class CAAATrainer:
         self.model.eval()
         with torch.no_grad():
             logits = self.model(X_t)
-            loss = self.criterion(logits, y_t)
+            if self.use_context_loss:
+                context = X_t[:, _CONTEXT_START:_CONTEXT_END]
+                loss, _ = self.criterion(logits, y_t, context)
+            else:
+                loss = self.criterion(logits, y_t)
         return loss.item()

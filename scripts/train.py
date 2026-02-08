@@ -6,6 +6,7 @@ import sys
 import os
 
 import numpy as np
+import yaml
 import torch
 from sklearn.model_selection import train_test_split
 
@@ -32,7 +33,24 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--baseline", action="store_true", help="Also train and compare with BaselineClassifier")
     parser.add_argument("--systems", nargs="+", default=["online-boutique"])
+    parser.add_argument("--config", type=str, default=None, help="Path to config YAML file")
     args = parser.parse_args()
+
+    # Load config if provided
+    if args.config:
+        with open(args.config, "r") as f:
+            config = yaml.safe_load(f)
+        training_cfg = config.get("training", {})
+        data_cfg = config.get("data", {})
+        # Apply config values only when CLI arg uses the default
+        if args.epochs == 50:
+            args.epochs = training_cfg.get("epochs", args.epochs)
+        if args.batch_size == 32:
+            args.batch_size = training_cfg.get("batch_size", args.batch_size)
+        if args.lr == 0.001:
+            args.lr = training_cfg.get("learning_rate", args.lr)
+        if args.systems == ["online-boutique"]:
+            args.systems = data_cfg.get("systems", args.systems)
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -91,6 +109,12 @@ def main():
     print(f"FP Reduction:       >{fp_red:.0f}%")
     print(f"Fault Recall:       >{caaa_metrics.get('fault_recall', 0):.2f}")
     print("=" * 50)
+
+    # Save model
+    os.makedirs("models/final", exist_ok=True)
+    save_path = "models/final/caaa_model.pt"
+    trainer.save_model(save_path)
+    print(f"Model saved to: {save_path}")
 
     # Baseline comparison
     if args.baseline:
