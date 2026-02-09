@@ -9,9 +9,10 @@ import torch.nn as nn
 from src.models.feature_encoder import FeatureEncoder
 from src.models.context_module import ContextIntegrationModule
 from src.models.caaa_model import CAAAModel
-from src.models.baseline import BaselineClassifier, NaiveBaseline
+from src.models.baseline import BaselineClassifier, NaiveBaseline, RuleBasedBaseline, XGBoostBaseline
 from src.data_loader.dataset import generate_combined_dataset
 from src.features.extractors import FeatureExtractor, N_FEATURES
+from src.evaluation.metrics import cross_validate_model
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
@@ -152,3 +153,61 @@ class TestNaiveBaseline:
         assert proba.shape == (10, 2)
         npt.assert_array_equal(proba[:, 0], 1.0)
         npt.assert_array_equal(proba[:, 1], 0.0)
+
+
+# ── RuleBasedBaseline ────────────────────────────────────────────────
+
+class TestRuleBasedBaseline:
+    def test_rule_based_predict(self, feature_data):
+        X, y = feature_data
+        rb = RuleBasedBaseline()
+        rb.fit(X, y)  # no-op but should not error
+        preds = rb.predict(X)
+        assert preds.shape == (len(y),)
+        assert set(preds).issubset({0, 1})
+
+    def test_rule_based_predict_proba(self, feature_data):
+        X, y = feature_data
+        rb = RuleBasedBaseline()
+        proba = rb.predict_proba(X)
+        assert proba.shape == (len(y), 2)
+        npt.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-6)
+
+
+# ── XGBoostBaseline ──────────────────────────────────────────────────
+
+class TestXGBoostBaseline:
+    def test_xgboost_baseline(self, feature_data):
+        X, y = feature_data
+        xgb = XGBoostBaseline(n_estimators=10, max_depth=3, random_state=42)
+        xgb.fit(X, y)
+        preds = xgb.predict(X)
+        assert preds.shape == (len(y),)
+        assert set(preds).issubset({0, 1})
+
+    def test_xgboost_predict_proba(self, feature_data):
+        X, y = feature_data
+        xgb = XGBoostBaseline(n_estimators=10, max_depth=3, random_state=42)
+        xgb.fit(X, y)
+        proba = xgb.predict_proba(X)
+        assert proba.shape == (len(y), 2)
+        npt.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-6)
+
+
+# ── cross_validate_model ─────────────────────────────────────────────
+
+class TestCrossValidateModel:
+    def test_cross_validate_returns_per_fold_metrics(self, feature_data):
+        X, y = feature_data
+        X = X.astype(np.float32)
+        fold_metrics = cross_validate_model(
+            model_factory=lambda: BaselineClassifier(n_estimators=10, max_depth=3, random_state=42),
+            X=X, y=y, n_splits=3, seed=42,
+        )
+        assert "accuracy" in fold_metrics
+        assert "f1" in fold_metrics
+        assert "fp_rate" in fold_metrics
+        assert len(fold_metrics["accuracy"]) == 3
+        # Accuracy should be between 0 and 1
+        for acc in fold_metrics["accuracy"]:
+            assert 0.0 <= acc <= 1.0

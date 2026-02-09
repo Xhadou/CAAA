@@ -34,12 +34,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.data_loader import generate_combined_dataset, generate_rcaeval_dataset
 from src.features import FeatureExtractor
-from src.models import CAAAModel, BaselineClassifier, NaiveBaseline
+from src.models import CAAAModel, BaselineClassifier, NaiveBaseline, RuleBasedBaseline, XGBoostBaseline
 from src.models.anomaly_detector import AnomalyDetector
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import (
     compute_all_metrics,
     compute_false_positive_rate,
+    cross_validate_model,
     print_evaluation_summary,
 )
 
@@ -75,6 +76,8 @@ def run_pipeline(
     ad_threshold_percentile: float = 95,
     # Hard scenarios
     include_hard: bool = False,
+    # Cross-validation
+    cv_folds: int = 1,
 ) -> dict:
     """Run the complete CAAA pipeline.
 
@@ -97,6 +100,7 @@ def run_pipeline(
         ad_epochs: Anomaly detector training epochs.
         ad_threshold_percentile: Anomaly detector threshold percentile.
         include_hard: Include hard/adversarial scenarios in dataset.
+        cv_folds: Number of cross-validation folds (1 = single split).
 
     Returns:
         Dictionary of evaluation metrics.
@@ -220,6 +224,14 @@ def run_pipeline(
             epochs=epochs, batch_size=batch_size, early_stopping_patience=10,
         )
         y_pred = trainer.predict(X_test)
+    elif model_type == "xgboost":
+        bl = XGBoostBaseline(random_state=seed)
+        bl.fit(X_train, y_train)
+        y_pred = bl.predict(X_test)
+    elif model_type == "rule_based":
+        bl = RuleBasedBaseline()
+        bl.fit(X_train, y_train)
+        y_pred = bl.predict(X_test)
     else:
         bl = BaselineClassifier(random_state=seed)
         bl.fit(X_train, y_train)
@@ -277,7 +289,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--model", type=str, default="caaa",
-        choices=["caaa", "random_forest"],
+        choices=["caaa", "random_forest", "xgboost", "rule_based"],
         help="Model type",
     )
     parser.add_argument("--systems", nargs="+", default=["online-boutique"])
@@ -285,6 +297,8 @@ def main() -> None:
     parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--include-hard", action="store_true",
                         help="Include hard/adversarial scenarios in dataset")
+    parser.add_argument("--cv-folds", type=int, default=1,
+                        help="Number of cross-validation folds (1 = single split)")
 
     # Data source
     parser.add_argument(
@@ -353,6 +367,7 @@ def main() -> None:
         ad_epochs=args.ad_epochs,
         ad_threshold_percentile=args.ad_threshold,
         include_hard=args.include_hard,
+        cv_folds=args.cv_folds,
     )
 
 

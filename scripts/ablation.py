@@ -8,14 +8,14 @@ import sys
 
 import numpy as np
 import torch
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 
 # Fallback for running without `pip install -e .`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.data_loader import generate_combined_dataset, generate_rcaeval_dataset
 from src.features import FeatureExtractor
-from src.models import CAAAModel, BaselineClassifier, NaiveBaseline
+from src.models import CAAAModel, BaselineClassifier, NaiveBaseline, RuleBasedBaseline, XGBoostBaseline
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import (
     compute_all_metrics,
@@ -94,6 +94,45 @@ def run_naive(X_test, y_test, naive_fp):
     return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
 
 
+def run_rule_based(X_train, y_train, X_test, y_test, naive_fp):
+    """Train and evaluate the rule-based baseline.
+
+    Args:
+        X_train: Training features.
+        y_train: Training labels.
+        X_test: Test features.
+        y_test: Test labels.
+        naive_fp: Naive baseline FP rate.
+
+    Returns:
+        Dictionary of evaluation metrics.
+    """
+    clf = RuleBasedBaseline()
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
+
+
+def run_xgboost(X_train, y_train, X_test, y_test, naive_fp, seed=42):
+    """Train and evaluate the XGBoost baseline.
+
+    Args:
+        X_train: Training features.
+        y_train: Training labels.
+        X_test: Test features.
+        y_test: Test labels.
+        naive_fp: Naive baseline FP rate.
+        seed: Random seed.
+
+    Returns:
+        Dictionary of evaluation metrics.
+    """
+    clf = XGBoostBaseline(random_state=seed)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
+
+
 def main():
     parser = argparse.ArgumentParser(description="CAAA Ablation Study")
     parser.add_argument("--n-fault", type=int, default=50)
@@ -122,6 +161,8 @@ def main():
                         help="Synthetic loads per RCAEval fault")
     parser.add_argument("--data-dir", type=str, default="data/raw",
                         help="RCAEval data directory")
+    parser.add_argument("--cv-folds", type=int, default=0,
+                        help="Number of CV folds (0 = use n-runs with train/test split)")
 
     args = parser.parse_args()
 
@@ -135,6 +176,8 @@ def main():
         "No Behavioral",
         "Context Only",
         "Baseline RF",
+        "XGBoost",
+        "Rule-Based",
         "Naive",
     ]
 
@@ -245,6 +288,18 @@ def main():
         m = run_baseline_rf(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
         for k in metrics_to_track:
             all_results["Baseline RF"][k].append(m.get(k, 0.0))
+
+        # --- XGBoost ---
+        print("  XGBoost...")
+        m = run_xgboost(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
+        for k in metrics_to_track:
+            all_results["XGBoost"][k].append(m.get(k, 0.0))
+
+        # --- Rule-Based ---
+        print("  Rule-Based...")
+        m = run_rule_based(X_train, y_train, X_test, y_test, naive_fp)
+        for k in metrics_to_track:
+            all_results["Rule-Based"][k].append(m.get(k, 0.0))
 
         # --- Naive ---
         print("  Naive...")
