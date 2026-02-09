@@ -119,3 +119,32 @@ class TestContextFeatures:
             if feats[event_idx] == 0.0:
                 inactive_count += 1
         assert inactive_count / len(fault_cases) >= 0.80
+
+
+# ── Change point features ────────────────────────────────────────────
+
+class TestChangePointFeatures:
+    def test_onset_gradient_computed_for_all_cases(self, extractor, dataset):
+        """onset_gradient should be a finite number for all cases."""
+        fault_cases, load_cases = dataset
+        names = extractor.feature_names()
+        onset_idx = names.index("onset_gradient")
+        for case in fault_cases + load_cases:
+            feats = extractor.extract(case)
+            assert np.isfinite(feats[onset_idx]), "onset_gradient is not finite"
+
+    def test_change_point_magnitude_computed_for_all_cases(self, extractor, dataset):
+        """change_point_magnitude should be a finite number for all cases."""
+        fault_cases, load_cases = dataset
+        names = extractor.feature_names()
+        mag_idx = names.index("change_point_magnitude")
+        for case in fault_cases + load_cases:
+            feats = extractor.extract(case)
+            assert np.isfinite(feats[mag_idx]), "change_point_magnitude is not finite"
+            assert feats[mag_idx] >= 0.0, "change_point_magnitude should be non-negative"
+
+    def test_change_point_magnitude_in_schema(self, extractor):
+        """change_point_magnitude should replace memory_trend_uniformity."""
+        names = extractor.feature_names()
+        assert "change_point_magnitude" in names
+        assert "memory_trend_uniformity" not in names
