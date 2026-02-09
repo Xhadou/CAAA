@@ -174,3 +174,71 @@ class TestContextConsistencyLoss:
         ce_loss = ce(logits, labels)
 
         npt.assert_allclose(total_loss.item(), ce_loss.item(), atol=1e-6)
+
+
+class TestTemperatureScaling:
+    """Test post-hoc temperature calibration."""
+
+    def test_temperature_is_learned(self):
+        """Temperature should differ from 1.0 after calibration."""
+        fault_cases, load_cases = generate_combined_dataset(
+            n_fault=15, n_load=15, seed=42,
+        )
+        all_cases = fault_cases + load_cases
+        labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
+
+        extractor = FeatureExtractor()
+        X = extractor.extract_batch(all_cases).astype(np.float32)
+
+        from sklearn.model_selection import train_test_split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, labels, test_size=0.3, random_state=42, stratify=labels,
+        )
+
+        torch.manual_seed(42)
+        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
+        trainer.train(X_train, y_train, epochs=20, batch_size=8)
+
+        assert trainer.temperature == 1.0  # default before calibration
+        T = trainer.calibrate_temperature(X_val, y_val)
+        assert T != 1.0, "Temperature should change from default after calibration"
+        assert T > 0.0, "Temperature must be positive"
+        assert trainer.temperature == T
+
+    def test_calibrated_confidence_differs(self):
+        """Calibrated confidences should differ from uncalibrated ones."""
+        fault_cases, load_cases = generate_combined_dataset(
+            n_fault=15, n_load=15, seed=99,
+        )
+        all_cases = fault_cases + load_cases
+        labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
+
+        extractor = FeatureExtractor()
+        X = extractor.extract_batch(all_cases).astype(np.float32)
+
+        from sklearn.model_selection import train_test_split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, labels, test_size=0.3, random_state=99, stratify=labels,
+        )
+
+        torch.manual_seed(99)
+        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
+        trainer.train(X_train, y_train, epochs=20, batch_size=8)
+
+        # Uncalibrated
+        _, confs_uncal = trainer.predict_with_confidence(X_val, confidence_threshold=0.5)
+
+        # Calibrate
+        trainer.calibrate_temperature(X_val, y_val)
+
+        # Calibrated
+        _, confs_cal = trainer.predict_with_confidence(X_val, confidence_threshold=0.5)
+
+        # Confidences should differ after calibration
+        assert not np.allclose(confs_uncal, confs_cal, atol=1e-6), \
+            "Calibrated confidences should differ from uncalibrated"
+        # All confidences should be valid probabilities
+        assert np.all(confs_cal >= 0.0)
+        assert np.all(confs_cal <= 1.0)

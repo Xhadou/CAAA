@@ -163,6 +163,8 @@ def main():
                         help="RCAEval data directory")
     parser.add_argument("--cv-folds", type=int, default=0,
                         help="Number of CV folds (0 = use n-runs with train/test split)")
+    parser.add_argument("--shap", action="store_true",
+                        help="Generate SHAP plots for Full CAAA and Baseline RF")
 
     args = parser.parse_args()
 
@@ -375,6 +377,48 @@ def main():
                 row.append(f"{summary[v][m + '_std']:.4f}")
             writer.writerow(row)
     print(f"\nResults saved to {csv_path}")
+
+    # SHAP analysis (optional, on last fold/run's data)
+    if args.shap:
+        from src.features.feature_schema import ALL_FEATURE_NAMES
+        from src.evaluation.visualization import plot_shap_summary, plot_shap_by_class
+
+        shap_dir = os.path.join(csv_dir, "shap")
+        os.makedirs(shap_dir, exist_ok=True)
+        print("\nGenerating SHAP plots on last fold data...")
+
+        # Baseline RF (fast)
+        print("  Baseline RF SHAP...")
+        rf = BaselineClassifier(random_state=args.base_seed)
+        rf.fit(X_train, y_train)
+        plot_shap_summary(
+            rf, X_test, ALL_FEATURE_NAMES,
+            save_path=os.path.join(shap_dir, "shap_baseline_rf.png"),
+        )
+        plot_shap_by_class(
+            rf, X_test, y_test, ALL_FEATURE_NAMES,
+            save_path=os.path.join(shap_dir, "shap_baseline_rf_by_class.png"),
+        )
+        print(f"  Saved to {shap_dir}/shap_baseline_rf*.png")
+
+        # Full CAAA (uses KernelExplainer, slower)
+        print("  Full CAAA SHAP (KernelExplainer, may take a moment)...")
+        torch.manual_seed(args.base_seed)
+        caaa_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        caaa_trainer = CAAATrainer(
+            caaa_model, learning_rate=args.lr, device="cpu",
+            use_context_loss=True,
+        )
+        caaa_trainer.train(
+            X_train, y_train, epochs=args.epochs,
+            batch_size=args.batch_size, early_stopping_patience=args.epochs,
+        )
+        plot_shap_summary(
+            caaa_trainer, X_test, ALL_FEATURE_NAMES,
+            save_path=os.path.join(shap_dir, "shap_full_caaa.png"),
+            X_background=X_train[:50],
+        )
+        print(f"  Saved to {shap_dir}/shap_full_caaa.png")
 
 
 if __name__ == "__main__":

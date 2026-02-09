@@ -265,6 +265,8 @@ def run_pipeline(
             X_train, y_train, X_val=X_test, y_val=y_test,
             epochs=epochs, batch_size=batch_size, early_stopping_patience=10,
         )
+        # Post-hoc temperature calibration on validation set
+        trainer.calibrate_temperature(X_test, y_test)
         y_pred = trainer.predict(X_test)
     elif model_type == "xgboost":
         bl = XGBoostBaseline(random_state=seed)

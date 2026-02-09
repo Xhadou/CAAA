@@ -59,6 +59,7 @@ class CAAATrainer:
             self.criterion = ContextConsistencyLoss()
         else:
             self.criterion = nn.CrossEntropyLoss()
+        self.temperature = 1.0  # default: no scaling; updated by calibrate_temperature()
 
     def train(
         self,
@@ -221,10 +222,58 @@ class CAAATrainer:
             preds = self.model.predict(X_t)
         return preds.cpu().numpy()
 
+    def calibrate_temperature(
+        self, X_val: np.ndarray, y_val: np.ndarray,
+        lr: float = 0.01, max_iter: int = 50,
+    ) -> float:
+        """Learn temperature parameter on validation data.
+
+        Minimizes NLL on the validation set by optimizing a single scalar T
+        such that ``softmax(logits / T)`` produces calibrated probabilities.
+        Must be called AFTER training, BEFORE ``predict_with_confidence``.
+
+        Reference: Guo et al., "On Calibration of Modern Neural Networks",
+        ICML 2017.
+
+        Args:
+            X_val: Validation features of shape (n_samples, input_dim).
+            y_val: Validation labels of shape (n_samples,).
+            lr: Learning rate for L-BFGS optimizer.
+            max_iter: Maximum optimizer iterations.
+
+        Returns:
+            Learned temperature value.
+        """
+        self.model.eval()
+        temperature = nn.Parameter(torch.ones(1, device=self.device) * 1.5)
+        optimizer = torch.optim.LBFGS([temperature], lr=lr, max_iter=max_iter)
+
+        X_t = torch.tensor(X_val, dtype=torch.float32, device=self.device)
+        y_t = torch.tensor(y_val, dtype=torch.long, device=self.device)
+
+        with torch.no_grad():
+            logits = self.model(X_t)
+
+        def eval_fn():
+            optimizer.zero_grad()
+            scaled = logits / temperature
+            loss = nn.CrossEntropyLoss()(scaled, y_t)
+            loss.backward()
+            return loss
+
+        optimizer.step(eval_fn)
+        self.temperature = temperature.item()
+        logger.info("Calibrated temperature: %.4f", self.temperature)
+        return self.temperature
+
     def predict_with_confidence(
         self, X: np.ndarray, confidence_threshold: float = 0.6
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Returns predictions with UNKNOWN class for low-confidence cases.
+
+        When ``calibrate_temperature()`` has been called, logits are divided
+        by the learned temperature before applying softmax, producing
+        better-calibrated confidence estimates.
 
         Args:
             X: Feature array of shape (n_samples, input_dim).
@@ -237,10 +286,12 @@ class CAAATrainer:
         X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
         self.model.eval()
         with torch.no_grad():
-            preds, confs = self.model.predict_with_confidence(
-                X_t, confidence_threshold=confidence_threshold
-            )
-        return preds.cpu().numpy(), confs.cpu().numpy()
+            logits = self.model(X_t)
+            scaled_logits = logits / self.temperature
+            probabilities = torch.softmax(scaled_logits, dim=-1)
+            confidences, predictions = torch.max(probabilities, dim=-1)
+            predictions[confidences < confidence_threshold] = 2
+        return predictions.cpu().numpy(), confidences.cpu().numpy()
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Returns predicted probabilities.
