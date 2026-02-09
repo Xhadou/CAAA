@@ -83,10 +83,10 @@ class CAAAModel(nn.Module):
         context_features = x[:, CONTEXT_START:CONTEXT_END]
 
         # Feature encoding of full feature vector
-        temporal_encoding = self.feature_encoder(x)
+        encoded_features = self.feature_encoder(x)
 
         # Context integration
-        integrated = self.context_module(temporal_encoding, context_features)
+        integrated = self.context_module(encoded_features, context_features)
 
         # Classification
         logits = self.classifier(integrated)
