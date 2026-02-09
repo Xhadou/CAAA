@@ -111,6 +111,8 @@ def main():
         choices=["synthetic", "rcaeval"],
         help="Data source: synthetic (default) or rcaeval (real faults)",
     )
+    parser.add_argument("--include-hard", action="store_true",
+                        help="Include hard/adversarial scenarios in dataset")
     parser.add_argument("--dataset", type=str, default="RE1",
                         choices=["RE1", "RE2"], help="RCAEval dataset")
     parser.add_argument("--system", type=str, default="online-boutique",
@@ -157,6 +159,7 @@ def main():
             fault_cases, load_cases = generate_combined_dataset(
                 n_fault=args.n_fault, n_load=args.n_load,
                 systems=args.systems, seed=run_seed,
+                include_hard=args.include_hard,
             )
         all_cases = fault_cases + load_cases
         labels = np.array([0 if c.label == "FAULT" else 1 for c in all_cases])

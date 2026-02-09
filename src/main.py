@@ -73,6 +73,8 @@ def run_pipeline(
     use_anomaly_detector: bool = False,
     ad_epochs: int = 50,
     ad_threshold_percentile: float = 95,
+    # Hard scenarios
+    include_hard: bool = False,
 ) -> dict:
     """Run the complete CAAA pipeline.
 
@@ -94,6 +96,7 @@ def run_pipeline(
         use_anomaly_detector: Enable LSTM-AE anomaly detection pre-stage.
         ad_epochs: Anomaly detector training epochs.
         ad_threshold_percentile: Anomaly detector threshold percentile.
+        include_hard: Include hard/adversarial scenarios in dataset.
 
     Returns:
         Dictionary of evaluation metrics.
@@ -130,6 +133,7 @@ def run_pipeline(
     else:
         fault_cases, load_cases = generate_combined_dataset(
             n_fault=n_fault, n_load=n_load, systems=systems, seed=seed,
+            include_hard=include_hard,
         )
         print(f"  Synthetic: {len(fault_cases)} faults + {len(load_cases)} loads")
 
@@ -279,6 +283,8 @@ def main() -> None:
     parser.add_argument("--systems", nargs="+", default=["online-boutique"])
     parser.add_argument("--output", type=str, default="outputs/results")
     parser.add_argument("--config", type=str, default=None)
+    parser.add_argument("--include-hard", action="store_true",
+                        help="Include hard/adversarial scenarios in dataset")
 
     # Data source
     parser.add_argument(
@@ -346,6 +352,7 @@ def main() -> None:
         use_anomaly_detector=args.anomaly_detector,
         ad_epochs=args.ad_epochs,
         ad_threshold_percentile=args.ad_threshold,
+        include_hard=args.include_hard,
     )
 
 
