@@ -198,7 +198,49 @@ def run_pipeline(
     print(f"  Feature matrix: {X.shape}")
 
     # ------------------------------------------------------------------
-    # Step 3: Split
+    # Cross-validation path (when cv_folds > 1)
+    # ------------------------------------------------------------------
+    if cv_folds > 1:
+        print(f"\n[3/5] Running {cv_folds}-fold cross-validation ({model_type})...")
+
+        def _model_factory():
+            if model_type == "xgboost":
+                return XGBoostBaseline(random_state=seed)
+            elif model_type == "rule_based":
+                return RuleBasedBaseline()
+            elif model_type in ("random_forest",):
+                return BaselineClassifier(random_state=seed)
+            else:
+                raise ValueError(
+                    f"CV not supported for model_type={model_type!r}; "
+                    "use cv_folds=1 for CAAA neural model."
+                )
+
+        fold_metrics = cross_validate_model(
+            model_factory=_model_factory,
+            X=X, y=labels, n_splits=cv_folds, seed=seed,
+        )
+
+        model_metrics = {}
+        for key, values in fold_metrics.items():
+            model_metrics[key] = float(np.mean(values))
+            model_metrics[key + "_std"] = float(np.std(values))
+
+        print(f"\n[4/5] CV Results ({cv_folds} folds)")
+        print("=" * 60)
+        print(f"  Accuracy:     {model_metrics['accuracy']:.3f} ± {model_metrics['accuracy_std']:.3f}")
+        print(f"  F1 Score:     {model_metrics['f1']:.3f} ± {model_metrics['f1_std']:.3f}")
+        print(f"  FP Rate:      {model_metrics['fp_rate']:.3f} ± {model_metrics['fp_rate_std']:.3f}")
+        fp_red = model_metrics.get("fp_reduction", 0)
+        fp_red_std = model_metrics.get("fp_reduction_std", 0)
+        print(f"  FP Reduction: {fp_red * 100:.1f}% ± {fp_red_std * 100:.1f}%")
+        print(f"  Fault Recall: {model_metrics['fault_recall']:.3f} ± {model_metrics['fault_recall_std']:.3f}")
+        print("=" * 60)
+
+        return model_metrics
+
+    # ------------------------------------------------------------------
+    # Step 3: Split (single train/test)
     # ------------------------------------------------------------------
     X_train, X_test, y_train, y_test = train_test_split(
         X, labels, test_size=0.2, random_state=seed, stratify=labels,

@@ -184,24 +184,28 @@ def main():
     # Collect results: {variant: {metric: [values across runs]}}
     all_results = {v: {m: [] for m in metrics_to_track} for v in variants}
 
-    for run_idx in range(args.n_runs):
-        run_seed = args.base_seed + run_idx
-        print(f"\n--- Run {run_idx + 1}/{args.n_runs} (seed={run_seed}) ---")
+    use_cv = args.cv_folds > 0
+    n_iterations = args.cv_folds if use_cv else args.n_runs
 
-        np.random.seed(run_seed)
-        torch.manual_seed(run_seed)
+    for run_idx in range(n_iterations if not use_cv else 1):
+        run_seed = args.base_seed + run_idx
+        if not use_cv:
+            print(f"\n--- Run {run_idx + 1}/{args.n_runs} (seed={run_seed}) ---")
+
+        np.random.seed(run_seed if not use_cv else args.base_seed)
+        torch.manual_seed(run_seed if not use_cv else args.base_seed)
 
         # Generate dataset
         if args.data == "rcaeval":
             fault_cases, load_cases = generate_rcaeval_dataset(
                 dataset=args.dataset, system=args.system,
                 n_load_per_fault=args.load_ratio,
-                data_dir=args.data_dir, seed=run_seed,
+                data_dir=args.data_dir, seed=run_seed if not use_cv else args.base_seed,
             )
         else:
             fault_cases, load_cases = generate_combined_dataset(
                 n_fault=args.n_fault, n_load=args.n_load,
-                systems=args.systems, seed=run_seed,
+                systems=args.systems, seed=run_seed if not use_cv else args.base_seed,
                 include_hard=args.include_hard,
             )
         all_cases = fault_cases + load_cases
@@ -210,102 +214,120 @@ def main():
         extractor = FeatureExtractor()
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, labels, test_size=0.2, random_state=run_seed, stratify=labels,
-        )
+        if use_cv:
+            # Generate all CV folds once — shared across all variants
+            skf = StratifiedKFold(
+                n_splits=args.cv_folds, shuffle=True, random_state=args.base_seed,
+            )
+            folds = list(skf.split(X, labels))
+        else:
+            # Single train/test split
+            from sklearn.model_selection import train_test_split as tts
+            train_idx, test_idx = tts(
+                np.arange(len(labels)), test_size=0.2,
+                random_state=run_seed, stratify=labels,
+            )
+            folds = [(train_idx, test_idx)]
 
-        # Naive baseline FP rate
-        naive = NaiveBaseline()
-        naive_pred = naive.predict(X_test)
-        naive_fp = compute_false_positive_rate(y_test, naive_pred)
+        for fold_idx, (train_idx, test_idx) in enumerate(folds):
+            if use_cv:
+                print(f"\n--- Fold {fold_idx + 1}/{args.cv_folds} ---")
 
-        # --- Full CAAA ---
-        print("  Full CAAA...")
-        m = run_caaa_variant(
-            X_train, y_train, X_test, y_test, naive_fp,
-            args.epochs, args.batch_size, args.lr,
-            use_context_loss=True, seed=run_seed,
-        )
-        for k in metrics_to_track:
-            all_results["Full CAAA"][k].append(m.get(k, 0.0))
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = labels[train_idx], labels[test_idx]
 
-        # --- No Context Features ---
-        print("  No Context Features...")
-        X_train_nc = X_train.copy()
-        X_test_nc = X_test.copy()
-        X_train_nc[:, 12:17] = 0.0
-        X_test_nc[:, 12:17] = 0.0
-        m = run_caaa_variant(
-            X_train_nc, y_train, X_test_nc, y_test, naive_fp,
-            args.epochs, args.batch_size, args.lr,
-            use_context_loss=True, seed=run_seed,
-        )
-        for k in metrics_to_track:
-            all_results["No Context Features"][k].append(m.get(k, 0.0))
+            # Naive baseline FP rate
+            naive = NaiveBaseline()
+            naive_pred = naive.predict(X_test)
+            naive_fp = compute_false_positive_rate(y_test, naive_pred)
 
-        # --- No Context Loss ---
-        print("  No Context Loss...")
-        m = run_caaa_variant(
-            X_train, y_train, X_test, y_test, naive_fp,
-            args.epochs, args.batch_size, args.lr,
-            use_context_loss=False, seed=run_seed,
-        )
-        for k in metrics_to_track:
-            all_results["No Context Loss"][k].append(m.get(k, 0.0))
+            # --- Full CAAA ---
+            print("  Full CAAA...")
+            m = run_caaa_variant(
+                X_train, y_train, X_test, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr,
+                use_context_loss=True, seed=run_seed,
+            )
+            for k in metrics_to_track:
+                all_results["Full CAAA"][k].append(m.get(k, 0.0))
 
-        # --- No Behavioral Features ---
-        print("  No Behavioral...")
-        X_train_nb = X_train.copy()
-        X_test_nb = X_test.copy()
-        X_train_nb[:, 6:12] = 0.0
-        X_test_nb[:, 6:12] = 0.0
-        m = run_caaa_variant(
-            X_train_nb, y_train, X_test_nb, y_test, naive_fp,
-            args.epochs, args.batch_size, args.lr,
-            use_context_loss=True, seed=run_seed,
-        )
-        for k in metrics_to_track:
-            all_results["No Behavioral"][k].append(m.get(k, 0.0))
+            # --- No Context Features ---
+            print("  No Context Features...")
+            X_train_nc = X_train.copy()
+            X_test_nc = X_test.copy()
+            X_train_nc[:, 12:17] = 0.0
+            X_test_nc[:, 12:17] = 0.0
+            m = run_caaa_variant(
+                X_train_nc, y_train, X_test_nc, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr,
+                use_context_loss=True, seed=run_seed,
+            )
+            for k in metrics_to_track:
+                all_results["No Context Features"][k].append(m.get(k, 0.0))
 
-        # --- Context Features Only ---
-        print("  Context Only...")
-        X_train_co = X_train.copy()
-        X_test_co = X_test.copy()
-        X_train_co[:, :12] = 0.0
-        X_train_co[:, 17:] = 0.0
-        X_test_co[:, :12] = 0.0
-        X_test_co[:, 17:] = 0.0
-        m = run_caaa_variant(
-            X_train_co, y_train, X_test_co, y_test, naive_fp,
-            args.epochs, args.batch_size, args.lr,
-            use_context_loss=True, seed=run_seed,
-        )
-        for k in metrics_to_track:
-            all_results["Context Only"][k].append(m.get(k, 0.0))
+            # --- No Context Loss ---
+            print("  No Context Loss...")
+            m = run_caaa_variant(
+                X_train, y_train, X_test, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr,
+                use_context_loss=False, seed=run_seed,
+            )
+            for k in metrics_to_track:
+                all_results["No Context Loss"][k].append(m.get(k, 0.0))
 
-        # --- Baseline RF ---
-        print("  Baseline RF...")
-        m = run_baseline_rf(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
-        for k in metrics_to_track:
-            all_results["Baseline RF"][k].append(m.get(k, 0.0))
+            # --- No Behavioral Features ---
+            print("  No Behavioral...")
+            X_train_nb = X_train.copy()
+            X_test_nb = X_test.copy()
+            X_train_nb[:, 6:12] = 0.0
+            X_test_nb[:, 6:12] = 0.0
+            m = run_caaa_variant(
+                X_train_nb, y_train, X_test_nb, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr,
+                use_context_loss=True, seed=run_seed,
+            )
+            for k in metrics_to_track:
+                all_results["No Behavioral"][k].append(m.get(k, 0.0))
 
-        # --- XGBoost ---
-        print("  XGBoost...")
-        m = run_xgboost(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
-        for k in metrics_to_track:
-            all_results["XGBoost"][k].append(m.get(k, 0.0))
+            # --- Context Features Only ---
+            print("  Context Only...")
+            X_train_co = X_train.copy()
+            X_test_co = X_test.copy()
+            X_train_co[:, :12] = 0.0
+            X_train_co[:, 17:] = 0.0
+            X_test_co[:, :12] = 0.0
+            X_test_co[:, 17:] = 0.0
+            m = run_caaa_variant(
+                X_train_co, y_train, X_test_co, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr,
+                use_context_loss=True, seed=run_seed,
+            )
+            for k in metrics_to_track:
+                all_results["Context Only"][k].append(m.get(k, 0.0))
 
-        # --- Rule-Based ---
-        print("  Rule-Based...")
-        m = run_rule_based(X_train, y_train, X_test, y_test, naive_fp)
-        for k in metrics_to_track:
-            all_results["Rule-Based"][k].append(m.get(k, 0.0))
+            # --- Baseline RF ---
+            print("  Baseline RF...")
+            m = run_baseline_rf(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
+            for k in metrics_to_track:
+                all_results["Baseline RF"][k].append(m.get(k, 0.0))
 
-        # --- Naive ---
-        print("  Naive...")
-        m = run_naive(X_test, y_test, naive_fp)
-        for k in metrics_to_track:
-            all_results["Naive"][k].append(m.get(k, 0.0))
+            # --- XGBoost ---
+            print("  XGBoost...")
+            m = run_xgboost(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
+            for k in metrics_to_track:
+                all_results["XGBoost"][k].append(m.get(k, 0.0))
+
+            # --- Rule-Based ---
+            print("  Rule-Based...")
+            m = run_rule_based(X_train, y_train, X_test, y_test, naive_fp)
+            for k in metrics_to_track:
+                all_results["Rule-Based"][k].append(m.get(k, 0.0))
+
+            # --- Naive ---
+            print("  Naive...")
+            m = run_naive(X_test, y_test, naive_fp)
+            for k in metrics_to_track:
+                all_results["Naive"][k].append(m.get(k, 0.0))
 
     # Compute mean ± std
     summary = {}
@@ -317,9 +339,11 @@ def main():
             summary[v][m + "_std"] = np.std(vals)
 
     # Print table
+    n_evals = args.cv_folds if use_cv else args.n_runs
+    eval_label = f"{args.cv_folds}-fold CV" if use_cv else f"{args.n_runs} runs"
     print()
     print("=" * 100)
-    print(f"ABLATION STUDY RESULTS (mean ± std over {args.n_runs} runs)")
+    print(f"ABLATION STUDY RESULTS (mean ± std over {eval_label})")
     print("=" * 100)
     header = f"{'Variant':<22s}{'Accuracy':>14s}{'F1 Score':>14s}{'FP Rate':>14s}{'Fault Recall':>14s}{'FP Reduction':>14s}"
     print(header)
