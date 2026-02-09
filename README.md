@@ -162,4 +162,4 @@ The 36-dimensional feature vector is organized into 5 groups:
 
 ## Authors
 
-- Shiv Nadar University
+Pratyush Jain
