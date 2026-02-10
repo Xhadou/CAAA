@@ -149,7 +149,9 @@ class SupConContextLoss(nn.Module):
         """
         batch_size = embeddings.shape[0]
 
-        # Per-sample temperature modulated by context_confidence (index 4)
+        # Per-sample temperature modulated by context_confidence
+        # (the last context feature, index 4 within the 5-element context vector;
+        # see src.features.feature_schema.CONTEXT_NAMES)
         ctx_conf = context_features[:, 4]
         temperature = self.base_temperature * (
             1.0 + self.context_weight * (1.0 - ctx_conf)

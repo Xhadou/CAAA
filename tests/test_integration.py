@@ -437,5 +437,11 @@ class TestAdaptiveThreshold:
             X, base_threshold=0.7, context_sensitivity=0.2,
         )
         # With context_sensitivity > 0, results should generally differ
-        # (unless all context_confidence values happen to be exactly 0.5)
         assert preds_fixed.shape == preds_adaptive.shape
+        # Verify that at least some predictions differ when context varies
+        # (context_confidence is not constant 0.5 across samples)
+        ctx_conf = X[:, CONTEXT_END - 1]
+        if not np.allclose(ctx_conf, 0.5, atol=0.01):
+            # With varying context confidence, adaptive should differ from fixed
+            assert not np.array_equal(preds_fixed, preds_adaptive), \
+                "Adaptive and fixed should differ with varying context_confidence"

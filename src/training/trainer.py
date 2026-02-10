@@ -341,9 +341,11 @@ class CAAATrainer:
             probabilities = torch.softmax(scaled_logits, dim=-1)
             confidences, predictions = torch.max(probabilities, dim=-1)
 
-            # Context-adaptive threshold
-            ctx_conf = X_t[:, _CONTEXT_END - 1]  # context_confidence feature
+            # Context-adaptive threshold: context_confidence is the last
+            # feature in the context group (see feature_schema.CONTEXT_NAMES)
+            ctx_conf = X_t[:, _CONTEXT_END - 1]
             threshold = base_threshold + context_sensitivity * (ctx_conf - 0.5)
+            # Clamp to [0.5, 0.95] to avoid degenerate thresholds
             threshold = torch.clamp(threshold, 0.5, 0.95)
 
             predictions[confidences < threshold] = 2
