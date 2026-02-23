@@ -25,7 +25,7 @@ features:
     - cross_service_sync
     - error_rate_delta
     - latency_cpu_correlation
-    - memory_trend_uniformity
+    - change_point_magnitude
 
   behavioral_features:
     - onset_gradient
