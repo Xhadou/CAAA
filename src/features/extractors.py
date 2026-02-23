@@ -9,7 +9,6 @@ via the ``ruptures`` library, inspired by BARO (FSE 2024) which showed that
 Bayesian change point detection before RCA improves results by 58-189%.
 """
 
-import functools
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -61,11 +60,10 @@ def _linear_slope(arr: np.ndarray) -> float:
     return float(coeffs[0]) if np.isfinite(coeffs[0]) else 0.0
 
 
-@functools.lru_cache(maxsize=256)
 def _detect_change_point_cached(
     series_tuple: Tuple[float, ...], penalty: float = 10,
 ) -> Tuple[int, float, float]:
-    """Cached wrapper around :func:`_detect_change_point`."""
+    """Wrapper around :func:`_detect_change_point`."""
     return _detect_change_point(np.array(series_tuple), penalty)
 
 
@@ -156,7 +154,8 @@ class FeatureExtractor:
             + _SERVICE_LEVEL_NAMES
         )
         assert len(self._names) == N_FEATURES
-        self._rng = np.random.RandomState(seed)
+        self._seed = seed
+        self._case_counter = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -171,10 +170,20 @@ class FeatureExtractor:
         Returns:
             A 1-D numpy array of shape ``(36,)``.
         """
+        # Derive a per-case RNG so that extraction order does not affect
+        # results.  The seed is based on case_id when available, otherwise
+        # on a monotonic counter (preserving batch-determinism).
+        if case.case_id is not None:
+            case_seed = (self._seed + hash(case.case_id)) % (2**32)
+        else:
+            case_seed = self._seed + self._case_counter
+        self._case_counter += 1
+        case_rng = np.random.default_rng(case_seed)
+
         feats = np.concatenate([
             self._workload_features(case.services),
             self._behavioral_features(case.services),
-            self._context_features(case.context, case.services),
+            self._context_features(case.context, case.services, rng=case_rng),
             self._statistical_features(case.services),
             self._service_level_features(case.services),
         ])
@@ -391,6 +400,8 @@ class FeatureExtractor:
         self,
         context: Optional[Dict],
         services: Optional[List[ServiceMetrics]] = None,
+        *,
+        rng: Optional[np.random.Generator] = None,
     ) -> np.ndarray:
         """Extract context features from an anomaly case.
 
@@ -405,7 +416,8 @@ class FeatureExtractor:
               for all cases, independent of the label
         """
         ctx = context or {}
-        rng = self._rng
+        if rng is None:
+            rng = np.random.default_rng(self._seed)
 
         # 13. event_active
         event_active = 1.0 if "event_type" in ctx else 0.0
@@ -437,7 +449,7 @@ class FeatureExtractor:
             time_seasonality = 0.5
 
         # 16. recent_deployment – label-independent base rate of 0.15
-        recent_deployment = 0.3 * rng.random_sample() if rng.random_sample() < 0.15 else 0.0
+        recent_deployment = 0.3 * rng.random() if rng.random() < 0.15 else 0.0
 
         # 17. context_confidence (with Gaussian noise, std=0.1)
         conf = 0.0

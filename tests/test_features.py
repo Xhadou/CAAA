@@ -179,3 +179,25 @@ class TestFeatureReproducibility:
 
         # Context features (indices 12-17) should differ due to noise
         assert not np.allclose(X1[:, 12:17], X2[:, 12:17])
+
+    def test_extraction_order_independent(self, dataset):
+        """Features for a case should not depend on extraction order.
+
+        Verifies fix for Issue #1: per-case deterministic RNG ensures
+        extracting case A then case B gives the same result as
+        extracting case B then case A.
+        """
+        fault_cases, load_cases = dataset
+        all_cases = fault_cases + load_cases
+
+        # Extract in original order
+        ext1 = FeatureExtractor(seed=42)
+        feat_first = ext1.extract(all_cases[0])
+
+        # Extract in reversed order — case 0 is now extracted last
+        ext2 = FeatureExtractor(seed=42)
+        for c in reversed(all_cases[1:]):
+            ext2.extract(c)
+        feat_after_others = ext2.extract(all_cases[0])
+
+        np.testing.assert_array_equal(feat_first, feat_after_others)
