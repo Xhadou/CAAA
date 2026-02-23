@@ -70,6 +70,9 @@ class ContextIntegrationModule(nn.Module):
             nn.Linear(1, 1),
             nn.Sigmoid(),
         )
+        # Bias=1.0 → initial sigmoid output ≈ 0.73, allowing context through
+        # by default rather than starting at an uninformative ~0.5.
+        nn.init.constant_(self.confidence_gate[0].bias, 1.0)
 
         # 4. Output projection + residual
         self.output_projection = nn.Linear(temporal_dim, temporal_dim)

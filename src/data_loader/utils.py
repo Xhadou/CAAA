@@ -1,10 +1,16 @@
 """Shared utilities for data generation modules."""
 
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
 
-def generate_base_metrics(sequence_length: int, service_name: str) -> pd.DataFrame:
+def generate_base_metrics(
+    sequence_length: int,
+    service_name: str,
+    rng: Optional[np.random.Generator] = None,
+) -> pd.DataFrame:
     """Generate a DataFrame of normal-operation metrics for one service.
 
     This is the shared implementation used by both
@@ -15,21 +21,26 @@ def generate_base_metrics(sequence_length: int, service_name: str) -> pd.DataFra
         sequence_length: Number of timesteps in the sequence.
         service_name: Name of the service (unused currently, but kept for
             future per-service baseline differentiation).
+        rng: NumPy random Generator instance.  When *None* a new
+            unseeded generator is created (non-deterministic).
 
     Returns:
         DataFrame with columns: timestamp, cpu_usage, memory_usage,
         request_rate, error_rate, latency, network_in, network_out.
     """
-    n = sequence_length
-    noise = lambda scale: np.random.normal(0, scale, n)
+    if rng is None:
+        rng = np.random.default_rng()
 
-    cpu = np.random.uniform(10, 30) + noise(2)
-    mem = np.random.uniform(20, 40) + noise(1.5)
-    req = np.random.uniform(50, 200) + noise(5)
-    err = np.random.uniform(0.001, 0.01) + noise(0.001)
-    lat = np.random.uniform(10, 100) + noise(3)
-    net_in = np.random.uniform(1000, 5000) + noise(50)
-    net_out = np.random.uniform(1000, 5000) + noise(50)
+    n = sequence_length
+    noise = lambda scale: rng.normal(0, scale, n)
+
+    cpu = rng.uniform(10, 30) + noise(2)
+    mem = rng.uniform(20, 40) + noise(1.5)
+    req = rng.uniform(50, 200) + noise(5)
+    err = rng.uniform(0.001, 0.01) + noise(0.001)
+    lat = rng.uniform(10, 100) + noise(3)
+    net_in = rng.uniform(1000, 5000) + noise(50)
+    net_out = rng.uniform(1000, 5000) + noise(50)
 
     # Clamp to sensible ranges
     cpu = np.clip(cpu, 0, 100)

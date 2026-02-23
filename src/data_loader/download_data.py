@@ -74,6 +74,11 @@ def download_rcaeval_dataset(
     data_path.mkdir(parents=True, exist_ok=True)
 
     urls = RCAEVAL_URLS.get(dataset, {})
+    if not urls:
+        raise ValueError(
+            f"Dataset '{dataset}' not available for download. "
+            f"Available: {list(RCAEVAL_URLS)}"
+        )
 
     for system in systems:
         if system not in urls:

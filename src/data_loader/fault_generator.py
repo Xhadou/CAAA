@@ -80,7 +80,7 @@ class FaultGenerator:
         """
         self.n_services = n_services
         self.sequence_length = sequence_length
-        np.random.seed(seed)
+        self.rng = np.random.default_rng(seed)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -95,7 +95,7 @@ class FaultGenerator:
         Returns:
             DataFrame with normal baseline metrics.
         """
-        return generate_base_metrics(self.sequence_length, service_name)
+        return generate_base_metrics(self.sequence_length, service_name, rng=self.rng)
 
     def _inject_fault(
         self, df: pd.DataFrame, fault_type: str, fault_start: int
@@ -118,37 +118,37 @@ class FaultGenerator:
         if fault_type == "cpu_hog":
             df.loc[fault_slice, "cpu_usage"] = np.clip(
                 df.loc[fault_slice, "cpu_usage"].values
-                + np.random.uniform(30, 60, fault_len),
+                + self.rng.uniform(30, 60, fault_len),
                 0, 100,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.1, 0.5),
+                + self.rng.uniform(0.1, 0.5),
                 0, 1,
             )
 
         elif fault_type == "memory_leak":
             # Gradual memory increase (leak pattern)
-            leak_ramp = np.linspace(0, np.random.uniform(30, 55), fault_len)
+            leak_ramp = np.linspace(0, self.rng.uniform(30, 55), fault_len)
             df.loc[fault_slice, "memory_usage"] = np.clip(
                 df.loc[fault_slice, "memory_usage"].values + leak_ramp,
                 0, 100,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.1, 0.5),
+                + self.rng.uniform(0.1, 0.5),
                 0, 1,
             )
 
         elif fault_type == "network_delay":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(200, 800, fault_len),
+                + self.rng.uniform(200, 800, fault_len),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.05, 0.3),
+                + self.rng.uniform(0.05, 0.3),
                 0, 1,
             )
 
@@ -161,24 +161,24 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.1, 0.5),
+                + self.rng.uniform(0.1, 0.5),
                 0, 1,
             )
 
         elif fault_type == "disk_io":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(100, 500, fault_len),
+                + self.rng.uniform(100, 500, fault_len),
                 0, None,
             )
             df.loc[fault_slice, "cpu_usage"] = np.clip(
                 df.loc[fault_slice, "cpu_usage"].values
-                + np.random.uniform(10, 30, fault_len),
+                + self.rng.uniform(10, 30, fault_len),
                 0, 100,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.05, 0.2),
+                + self.rng.uniform(0.05, 0.2),
                 0, 1,
             )
 
@@ -189,7 +189,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.4, 0.8),
+                + self.rng.uniform(0.4, 0.8),
                 0, 1,
             )
             df.loc[fault_slice, "cpu_usage"] = np.clip(
@@ -199,12 +199,12 @@ class FaultGenerator:
         elif fault_type == "dns_failure":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(500, 2000, fault_len),
+                + self.rng.uniform(500, 2000, fault_len),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.2, 0.6),
+                + self.rng.uniform(0.2, 0.6),
                 0, 1,
             )
             df.loc[fault_slice, "network_in"] = np.clip(
@@ -214,12 +214,12 @@ class FaultGenerator:
         elif fault_type == "connection_pool_exhaustion":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(300, 1000, fault_len),
+                + self.rng.uniform(300, 1000, fault_len),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.15, 0.5),
+                + self.rng.uniform(0.15, 0.5),
                 0, 1,
             )
             # Requests back up
@@ -229,19 +229,19 @@ class FaultGenerator:
 
         elif fault_type == "thread_leak":
             # CPU climbs gradually, latency grows
-            leak_ramp = np.linspace(0, np.random.uniform(20, 50), fault_len)
+            leak_ramp = np.linspace(0, self.rng.uniform(20, 50), fault_len)
             df.loc[fault_slice, "cpu_usage"] = np.clip(
                 df.loc[fault_slice, "cpu_usage"].values + leak_ramp,
                 0, 100,
             )
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(50, 300, fault_len),
+                + self.rng.uniform(50, 300, fault_len),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.05, 0.3),
+                + self.rng.uniform(0.05, 0.3),
                 0, 1,
             )
 
@@ -249,12 +249,12 @@ class FaultGenerator:
             # Immediate error spike, some latency increase
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.2, 0.7),
+                + self.rng.uniform(0.2, 0.7),
                 0, 1,
             )
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(50, 200, fault_len),
+                + self.rng.uniform(50, 200, fault_len),
                 0, None,
             )
 
@@ -262,12 +262,12 @@ class FaultGenerator:
             # Downstream dependency dies — errors spike, latency goes up
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.2, 0.6),
+                + self.rng.uniform(0.2, 0.6),
                 0, 1,
             )
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(200, 600, fault_len),
+                + self.rng.uniform(200, 600, fault_len),
                 0, None,
             )
             df.loc[fault_slice, "request_rate"] = np.clip(
@@ -307,14 +307,14 @@ class FaultGenerator:
         eligible_services = [s for s in self.SERVICE_NAMES[: self.n_services] if s != "loadgenerator"]
 
         if fault_type is None:
-            fault_type = str(np.random.choice(self.FAULT_TYPES))
+            fault_type = str(self.rng.choice(self.FAULT_TYPES))
         if fault_service is None:
-            fault_service = str(np.random.choice(eligible_services))
+            fault_service = str(self.rng.choice(eligible_services))
 
         # Fault starts at a random point in the middle third of the sequence
         mid_start = self.sequence_length // 3
         mid_end = 2 * self.sequence_length // 3
-        fault_start = int(np.random.randint(mid_start, mid_end))
+        fault_start = int(self.rng.integers(mid_start, mid_end))
 
         logger.info(
             "Generating fault metrics: system=%s service=%s type=%s start=%d",

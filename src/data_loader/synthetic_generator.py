@@ -87,7 +87,7 @@ class SyntheticMetricsGenerator:
         """
         self.n_services = n_services
         self.sequence_length = sequence_length
-        np.random.seed(seed)
+        self.rng = np.random.default_rng(seed)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -102,7 +102,7 @@ class SyntheticMetricsGenerator:
         Returns:
             DataFrame with normal baseline metrics.
         """
-        return generate_base_metrics(self.sequence_length, service_name)
+        return generate_base_metrics(self.sequence_length, service_name, rng=self.rng)
 
     # ------------------------------------------------------------------
     # Public API
@@ -153,13 +153,13 @@ class SyntheticMetricsGenerator:
             Tuple of (list of ServiceMetrics, context dict).
         """
         if event_type is None:
-            event_type = str(np.random.choice(EVENT_TYPES))
+            event_type = str(self.rng.choice(EVENT_TYPES))
 
         cfg = EVENT_TYPE_CONFIG[event_type]
 
         if load_multiplier is None:
             load_multiplier = float(
-                np.random.uniform(*cfg["multiplier_range"])
+                self.rng.uniform(*cfg["multiplier_range"])
             )
 
         err_lo, err_hi = cfg["error_rate_mult_range"]
@@ -172,12 +172,12 @@ class SyntheticMetricsGenerator:
         )
 
         n = self.sequence_length
-        ramp_frac = np.random.uniform(0.10, 0.20)
+        ramp_frac = self.rng.uniform(0.10, 0.20)
         ramp_len = max(1, int(n * ramp_frac))
 
         # Build a shared envelope: 0 → 1 ramp-up, plateau, 1 → 0 ramp-down
-        spike_start = np.random.randint(int(n * 0.15), int(n * 0.35))
-        spike_end = min(n, spike_start + np.random.randint(int(n * 0.3), int(n * 0.5)))
+        spike_start = self.rng.integers(int(n * 0.15), int(n * 0.35))
+        spike_end = min(n, spike_start + self.rng.integers(int(n * 0.3), int(n * 0.5)))
         ramp_down_start = max(spike_start + ramp_len, spike_end - ramp_len)
 
         envelope = np.zeros(n)
@@ -204,7 +204,7 @@ class SyntheticMetricsGenerator:
             df["network_out"] = np.clip(df["network_out"] * mult, 0, None)
 
             # Error rate stays stable — key differentiator from faults
-            err_mult = np.random.uniform(err_lo, err_hi)
+            err_mult = self.rng.uniform(err_lo, err_hi)
             df["error_rate"] = np.clip(df["error_rate"] * err_mult, 0, 1)
 
             results.append(ServiceMetrics(service_name=name, metrics=df))

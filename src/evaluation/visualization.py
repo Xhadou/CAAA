@@ -614,3 +614,87 @@ def plot_reliability_diagram(
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info("Reliability diagram saved to %s", save_path)
     plt.close(fig)
+
+
+def plot_fp_vs_threshold(
+    y_true: np.ndarray,
+    proba: np.ndarray,
+    thresholds: Optional[np.ndarray] = None,
+    save_path: Optional[str] = None,
+) -> None:
+    """Plot FP rate and coverage as a function of the confidence threshold.
+
+    For each threshold value, samples whose max softmax probability is
+    below the threshold are classified as UNKNOWN (deferred).  The plot
+    shows two curves:
+
+    - **Coverage**: fraction of samples that receive a definitive
+      (non-UNKNOWN) prediction.
+    - **FP rate (known)**: false positive rate computed only over
+      definitive predictions.
+
+    This is the key diagnostic for comparing fixed and adaptive
+    threshold strategies.
+
+    Args:
+        y_true: Ground truth labels of shape (n_samples,).
+        proba: Predicted probabilities of shape (n_samples, n_classes).
+        thresholds: Array of threshold values to sweep.  Defaults to
+            ``np.linspace(0.5, 0.99, 50)``.
+        save_path: Path to save the figure.  If None, displays the plot.
+    """
+    if thresholds is None:
+        thresholds = np.linspace(0.5, 0.99, 50)
+
+    coverages = []
+    fp_rates = []
+    confidences = np.max(proba, axis=1)
+    predictions = np.argmax(proba, axis=1)
+
+    for t in thresholds:
+        known_mask = confidences >= t
+        coverage = known_mask.sum() / len(y_true) if len(y_true) > 0 else 0.0
+        coverages.append(coverage)
+
+        if known_mask.sum() > 0:
+            y_known = y_true[known_mask]
+            p_known = predictions[known_mask]
+            negatives = y_known != 0
+            n_neg = negatives.sum()
+            if n_neg > 0:
+                fp = ((p_known == 0) & negatives).sum()
+                fp_rates.append(float(fp / n_neg))
+            else:
+                fp_rates.append(0.0)
+        else:
+            fp_rates.append(0.0)
+
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    color_cov = "#3498db"
+    color_fp = "#e74c3c"
+
+    ax1.plot(thresholds, coverages, color=color_cov, label="Coverage")
+    ax1.set_xlabel("Confidence Threshold")
+    ax1.set_ylabel("Coverage (fraction of definitive predictions)", color=color_cov)
+    ax1.tick_params(axis="y", labelcolor=color_cov)
+    ax1.set_ylim(0, 1.05)
+
+    ax2 = ax1.twinx()
+    ax2.plot(thresholds, fp_rates, color=color_fp, linestyle="--", label="FP Rate (known)")
+    ax2.set_ylabel("FP Rate (definitive predictions only)", color=color_fp)
+    ax2.tick_params(axis="y", labelcolor=color_fp)
+    ax2.set_ylim(0, max(max(fp_rates) * 1.2, 0.1) if fp_rates else 0.1)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="center right")
+
+    ax1.set_title("Coverage vs FP Rate Trade-off")
+    ax1.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_parent_dir(save_path)
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        logger.info("FP vs threshold plot saved to %s", save_path)
+    plt.close(fig)

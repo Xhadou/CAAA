@@ -91,7 +91,7 @@ The system extracts a 36-dimensional feature vector organized into 5 groups, def
 
 | Group | Dims | Features | Purpose |
 |-------|------|----------|---------|
-| **Workload** | 0–5 | `global_load_ratio`, `cpu_request_correlation`, `cross_service_sync`, `error_rate_delta`, `latency_cpu_correlation`, `memory_trend_uniformity` | Characterize whether metric changes correlate with workload |
+| **Workload** | 0–5 | `global_load_ratio`, `cpu_request_correlation`, `cross_service_sync`, `error_rate_delta`, `latency_cpu_correlation`, `change_point_magnitude` | Characterize whether metric changes correlate with workload |
 | **Behavioral** | 6–11 | `onset_gradient`, `peak_duration`, `cascade_score`, `recovery_indicator`, `affected_service_ratio`, `variance_change_ratio` | Capture fault propagation signatures vs. smooth load ramps |
 | **Context** | 12–16 | `event_active`, `event_expected_impact`, `time_seasonality`, `recent_deployment`, `context_confidence` | External context signals (the key innovation) |
 | **Statistical** | 17–29 | Mean/std of CPU, memory, requests, errors, latency, network; `max_error_rate` | Standard metric statistics |
