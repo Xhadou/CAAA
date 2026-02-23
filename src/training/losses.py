@@ -62,6 +62,7 @@ class ContextConsistencyLoss(nn.Module):
         # 2. Context consistency loss
         probs = torch.softmax(logits, dim=-1)
         event_active = context_features[:, 0]  # 1.0 = load event happening
+        context_confidence = context_features[:, 4]
 
         # When event_active == 1.0, penalize predicting FAULT (class 0)
         fault_prob = probs[:, 0]
@@ -71,11 +72,14 @@ class ContextConsistencyLoss(nn.Module):
         load_prob = probs[:, 1]
         penalty_when_no_event = (1.0 - event_active) * load_prob
 
-        consistency_loss = torch.mean(penalty_when_event + penalty_when_no_event)
+        # Weight by context_confidence so that corrupted/unreliable context
+        # (10% of faults with fake events, 15% of loads without events)
+        # contributes little to the penalty.
+        per_sample_penalty = penalty_when_event + penalty_when_no_event
+        consistency_loss = torch.mean(context_confidence * per_sample_penalty)
 
         # 3. Confidence calibration loss
         # When context_confidence is high, penalize high entropy (uncertainty)
-        context_confidence = context_features[:, 4]
         # Compute entropy of softmax distribution
         log_probs = torch.log_softmax(logits, dim=-1)
         entropy = -torch.sum(probs * log_probs, dim=-1)  # (batch,)
@@ -178,8 +182,10 @@ class SupConContextLoss(nn.Module):
         )
 
         n_positives = positive_mask.sum(dim=1)
+        # clamp(min=1) avoids huge gradients when n_positives=0: the
+        # numerator is also 0 in that case, yielding a clean 0/1=0.
         contrastive_loss = -(positive_mask * log_prob).sum(dim=1) / (
-            n_positives + 1e-8
+            n_positives.clamp(min=1)
         )
         contrastive_loss = contrastive_loss.mean()
 

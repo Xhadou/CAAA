@@ -142,24 +142,27 @@ class AnomalyDetector:
             calibration_split: Fraction of data held out for threshold
                 calibration (avoids data leakage).
         """
-        # Fit scaler on concatenated data for consistent normalisation
+        # Concatenate raw data
         raw_parts = []
         for m in train_metrics:
             numeric = m.select_dtypes(include=[np.number])
             raw_parts.append(np.nan_to_num(numeric.values, nan=0.0))
         combined_raw = np.vstack(raw_parts)
-        self.scaler.fit(combined_raw)
+        n_features = combined_raw.shape[1]
 
-        combined = self.scaler.transform(combined_raw)
-        n_features = combined.shape[1]
-
-        # Split into train and calibration sets
-        n_cal = max(1, int(len(combined) * calibration_split))
-        n_train = len(combined) - n_cal
+        # Split into train and calibration sets BEFORE fitting the scaler
+        # to avoid data leakage from calibration data into normalisation.
+        n_cal = max(1, int(len(combined_raw) * calibration_split))
+        n_train = len(combined_raw) - n_cal
         rng = np.random.RandomState(42)
-        indices = rng.permutation(len(combined))
-        train_data = combined[indices[:n_train]]
-        cal_data = combined[indices[n_train:]]
+        indices = rng.permutation(len(combined_raw))
+        train_raw = combined_raw[indices[:n_train]]
+        cal_raw = combined_raw[indices[n_train:]]
+
+        # Fit scaler on training portion only, then transform both
+        self.scaler.fit(train_raw)
+        train_data = self.scaler.transform(train_raw)
+        cal_data = self.scaler.transform(cal_raw)
 
         self.model = LSTMAutoencoder(
             n_features=n_features,

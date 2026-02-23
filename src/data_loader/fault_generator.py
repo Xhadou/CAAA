@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.data_loader.data_types import ServiceMetrics
 from src.data_loader.synthetic_generator import SERVICE_NAMES
+from src.data_loader.utils import generate_base_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -94,37 +95,7 @@ class FaultGenerator:
         Returns:
             DataFrame with normal baseline metrics.
         """
-        n = self.sequence_length
-        noise = lambda scale: np.random.normal(0, scale, n)
-
-        cpu = np.random.uniform(10, 30) + noise(2)
-        mem = np.random.uniform(20, 40) + noise(1.5)
-        req = np.random.uniform(50, 200) + noise(5)
-        err = np.random.uniform(0.001, 0.01) + noise(0.001)
-        lat = np.random.uniform(10, 100) + noise(3)
-        net_in = np.random.uniform(1000, 5000) + noise(50)
-        net_out = np.random.uniform(1000, 5000) + noise(50)
-
-        cpu = np.clip(cpu, 0, 100)
-        mem = np.clip(mem, 0, 100)
-        req = np.clip(req, 0, None)
-        err = np.clip(err, 0, 1)
-        lat = np.clip(lat, 0, None)
-        net_in = np.clip(net_in, 0, None)
-        net_out = np.clip(net_out, 0, None)
-
-        return pd.DataFrame(
-            {
-                "timestamp": np.arange(n),
-                "cpu_usage": cpu,
-                "memory_usage": mem,
-                "request_rate": req,
-                "error_rate": err,
-                "latency": lat,
-                "network_in": net_in,
-                "network_out": net_out,
-            }
-        )
+        return generate_base_metrics(self.sequence_length, service_name)
 
     def _inject_fault(
         self, df: pd.DataFrame, fault_type: str, fault_start: int

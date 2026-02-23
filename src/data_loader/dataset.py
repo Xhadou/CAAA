@@ -20,7 +20,7 @@ def generate_combined_dataset(
     n_load: int = 50,
     systems: Optional[List[str]] = None,
     seed: int = 42,
-    include_hard: bool = False,
+    include_hard: bool = True,
 ) -> Tuple[List[AnomalyCase], List[AnomalyCase]]:
     """Generate a combined dataset of FAULT and EXPECTED_LOAD cases.
 
@@ -30,8 +30,8 @@ def generate_combined_dataset(
         systems: List of system names to cycle through. Defaults to
             ["online-boutique"].
         seed: Random seed for reproducibility.
-        include_hard: When True, replace 20% of cases (5% each type)
-            with hard/adversarial scenarios from :func:`generate_hard_dataset`.
+        include_hard: When True, replace ~35% of cases with
+            hard/adversarial scenarios from :func:`generate_hard_dataset`.
 
     Returns:
         Tuple of (fault_cases, load_cases).
@@ -97,12 +97,15 @@ def generate_combined_dataset(
             )
         )
 
-    # Optionally replace 20% of cases with hard/adversarial scenarios
-    if include_hard:
-        n_hard_fault = max(1, int(n_fault * 0.10))  # 10% of faults per hard fault type
-        n_hard_load = max(1, int(n_load * 0.10))    # 10% of loads per hard load type
+    # Optionally replace ~35% of cases with hard/adversarial scenarios
+    if include_hard and (n_fault > 0 or n_load > 0):
+        # 3 fault hard types at ~12% each ≈ 36% fault replacement
+        n_fault_per_type = max(1, int(n_fault * 0.12)) if n_fault > 0 else 0
+        # 2 load hard types at ~15% each ≈ 30% load replacement
+        n_load_per_type = max(1, int(n_load * 0.15)) if n_load > 0 else 0
         hard_fault, hard_load = generate_hard_dataset(
-            n_per_type=max(1, max(n_hard_fault, n_hard_load) // 2),
+            n_fault_per_type=n_fault_per_type,
+            n_load_per_type=n_load_per_type,
             systems=systems,
             seed=seed + 100,
         )
@@ -261,39 +264,72 @@ HARD_SCENARIO_TYPES: List[str] = [
     "fault_during_event",
     "capacity_exceeded_load",
     "gradual_fault",
+    "correlated_fault",
     "partial_load",
 ]
 
+# Online-Boutique service dependency graph used for correlated_fault
+# scenarios.  Each key maps to services that would be impacted by a
+# fault propagating from that service.
+_SERVICE_ADJACENCY: Dict[str, List[str]] = {
+    "frontend": ["cart", "checkout", "productcatalog", "recommendation", "ad", "currency"],
+    "cart": ["frontend", "redis-cart"],
+    "checkout": ["frontend", "cart", "payment", "shipping", "email", "currency", "productcatalog"],
+    "payment": ["checkout"],
+    "shipping": ["checkout"],
+    "email": ["checkout"],
+    "currency": ["frontend", "checkout"],
+    "productcatalog": ["frontend", "checkout", "recommendation"],
+    "recommendation": ["frontend", "productcatalog"],
+    "ad": ["frontend"],
+    "redis-cart": ["cart"],
+}
+
 
 def generate_hard_dataset(
-    n_per_type: int = 5,
+    n_fault_per_type: int = 5,
+    n_load_per_type: int = 5,
     systems: Optional[List[str]] = None,
     seed: int = 42,
+    *,
+    n_per_type: Optional[int] = None,
 ) -> Tuple[List[AnomalyCase], List[AnomalyCase]]:
     """Generate hard/adversarial evaluation cases.
 
-    Produces four scenario types where the distinction between FAULT and
+    Produces five scenario types where the distinction between FAULT and
     EXPECTED_LOAD is intentionally ambiguous:
 
     - **fault_during_event** (FAULT): A real fault occurs on top of a
       legitimate load spike. Metrics show both load and fault signatures.
     - **capacity_exceeded_load** (EXPECTED_LOAD): An extreme load spike
-      (5-10×) causes error-rate increases and latency degradation purely
+      (5-10x) causes error-rate increases and latency degradation purely
       from capacity exhaustion, not from a fault.
     - **gradual_fault** (FAULT): A fault that ramps up slowly (like a
       memory leak) across the full window, mimicking gradual load.
+    - **correlated_fault** (FAULT): A fault in one service propagates to
+      2-3 neighbors with attenuated severity, resembling a load spike
+      that affects multiple services.
     - **partial_load** (EXPECTED_LOAD): A load spike that affects only
       3-4 services, overlapping with the localised-impact pattern of
       faults.
 
     Args:
-        n_per_type: Number of cases to generate per scenario type.
+        n_fault_per_type: Number of cases per fault scenario type.
+        n_load_per_type: Number of cases per load scenario type.
         systems: System names to cycle through.
         seed: Random seed for reproducibility.
+        n_per_type: Deprecated — if provided, used as both
+            *n_fault_per_type* and *n_load_per_type* for backward
+            compatibility.
 
     Returns:
         Tuple of (fault_cases, load_cases).
     """
+    # Backward compatibility
+    if n_per_type is not None:
+        n_fault_per_type = n_per_type
+        n_load_per_type = n_per_type
+
     if systems is None:
         systems = ["online-boutique"]
 
@@ -305,7 +341,7 @@ def generate_hard_dataset(
     load_cases: List[AnomalyCase] = []
 
     # --- (a) FAULT_DURING_EVENT: fault injected on top of load spike ---
-    for i in range(n_per_type):
+    for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
         # Generate a load spike first
         services, context = load_gen.generate_load_spike_metrics(system=system)
@@ -332,7 +368,7 @@ def generate_hard_dataset(
         )
 
     # --- (b) CAPACITY_EXCEEDED_LOAD: extreme load causes errors ---
-    for i in range(n_per_type):
+    for i in range(n_load_per_type):
         system = systems[i % len(systems)]
         high_mult = float(np.random.uniform(5.0, 10.0))
         services, context = load_gen.generate_load_spike_metrics(
@@ -365,7 +401,7 @@ def generate_hard_dataset(
         )
 
     # --- (c) GRADUAL_FAULT: slow ramp-up over full window ---
-    for i in range(n_per_type):
+    for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
             system=system,
@@ -403,8 +439,61 @@ def generate_hard_dataset(
             )
         )
 
+    # --- (e) CORRELATED_FAULT: fault propagates to neighbor services ---
+    for i in range(n_fault_per_type):
+        system = systems[i % len(systems)]
+        services, fault_service, fault_type = fault_gen.generate_fault_metrics(
+            system=system,
+        )
+        # Pick 2-3 neighbor services and inject attenuated faults
+        neighbors = _SERVICE_ADJACENCY.get(fault_service, [])
+        svc_map = {s.service_name: s for s in services}
+        n_cascade = min(np.random.randint(2, 4), len(neighbors))
+        if n_cascade > 0 and neighbors:
+            cascade_targets = list(
+                np.random.choice(neighbors, size=n_cascade, replace=False)
+            )
+            for target_name in cascade_targets:
+                if target_name not in svc_map:
+                    continue
+                target_svc = svc_map[target_name]
+                df = target_svc.metrics
+                n_ts = len(df)
+                # Attenuated severity: 50-80% of what the primary service got
+                attenuation = np.random.uniform(0.5, 0.8)
+                fault_start = n_ts // 3
+                fault_sl = slice(fault_start, n_ts)
+                fault_len = n_ts - fault_start
+                # Inject attenuated error/latency increases
+                df.loc[fault_sl, "error_rate"] = np.clip(
+                    df.loc[fault_sl, "error_rate"].values
+                    + np.random.uniform(0.05, 0.25) * attenuation,
+                    0, 1,
+                )
+                df.loc[fault_sl, "latency"] = np.clip(
+                    df.loc[fault_sl, "latency"].values
+                    + np.random.uniform(50, 200, fault_len) * attenuation,
+                    0, None,
+                )
+                df.loc[fault_sl, "cpu_usage"] = np.clip(
+                    df.loc[fault_sl, "cpu_usage"].values
+                    + np.random.uniform(5, 20, fault_len) * attenuation,
+                    0, 100,
+                )
+        fault_cases.append(
+            AnomalyCase(
+                case_id=f"hard_correlated_fault_{i:04d}",
+                system=system,
+                label="FAULT",
+                services=services,
+                context={},
+                fault_service=fault_service,
+                fault_type=fault_type,
+            )
+        )
+
     # --- (d) PARTIAL_LOAD: spike affects only 3-4 services ---
-    for i in range(n_per_type):
+    for i in range(n_load_per_type):
         system = systems[i % len(systems)]
         services, context = load_gen.generate_load_spike_metrics(system=system)
         # Reset most services to baseline (keep only 3-4 affected)
@@ -429,7 +518,8 @@ def generate_hard_dataset(
         )
 
     logger.info(
-        "Hard dataset: %d fault cases, %d load cases (n_per_type=%d)",
-        len(fault_cases), len(load_cases), n_per_type,
+        "Hard dataset: %d fault cases, %d load cases "
+        "(n_fault_per_type=%d, n_load_per_type=%d)",
+        len(fault_cases), len(load_cases), n_fault_per_type, n_load_per_type,
     )
     return fault_cases, load_cases

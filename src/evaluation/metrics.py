@@ -1,7 +1,7 @@
 """Evaluation metrics for the CAAA system."""
 
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
@@ -224,3 +224,50 @@ def cross_validate_model(
         logger.debug("Fold %d: accuracy=%.3f, f1=%.3f", fold_idx, metrics["accuracy"], metrics["f1"])
 
     return fold_metrics
+
+
+def compute_expected_calibration_error(
+    y_true: np.ndarray,
+    proba: np.ndarray,
+    n_bins: int = 10,
+) -> Tuple[float, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute Expected Calibration Error (ECE).
+
+    Bins predictions by max-class probability and measures the gap between
+    mean confidence and accuracy in each bin.
+
+    Reference: Guo et al., "On Calibration of Modern Neural Networks",
+    ICML 2017.
+
+    Args:
+        y_true: Ground truth labels of shape (n_samples,).
+        proba: Predicted probabilities of shape (n_samples, n_classes).
+        n_bins: Number of equally-spaced confidence bins.
+
+    Returns:
+        Tuple of (ece, bin_accuracies, bin_confidences, bin_counts) where
+        *ece* is the scalar ECE value and the arrays have length *n_bins*.
+    """
+    confidences = np.max(proba, axis=1)
+    predictions = np.argmax(proba, axis=1)
+    correct = (predictions == y_true).astype(float)
+
+    bin_boundaries = np.linspace(0.0, 1.0, n_bins + 1)
+    bin_accuracies = np.zeros(n_bins)
+    bin_confidences = np.zeros(n_bins)
+    bin_counts = np.zeros(n_bins, dtype=int)
+
+    for b in range(n_bins):
+        lo, hi = bin_boundaries[b], bin_boundaries[b + 1]
+        mask = (confidences > lo) & (confidences <= hi)
+        count = mask.sum()
+        bin_counts[b] = count
+        if count > 0:
+            bin_accuracies[b] = correct[mask].mean()
+            bin_confidences[b] = confidences[mask].mean()
+
+    # Weighted average of |accuracy - confidence| per bin
+    total = len(y_true)
+    ece = float(np.sum(bin_counts / total * np.abs(bin_accuracies - bin_confidences)))
+
+    return ece, bin_accuracies, bin_confidences, bin_counts

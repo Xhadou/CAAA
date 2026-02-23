@@ -461,7 +461,8 @@ class CAAATrainer:
         self.model.eval()
         with torch.no_grad():
             logits = self.model(X_t)
-            proba = torch.softmax(logits, dim=-1)
+            scaled_logits = logits / self.temperature
+            proba = torch.softmax(scaled_logits, dim=-1)
         return proba.cpu().numpy()
 
     def save_model(self, path: str) -> None:
