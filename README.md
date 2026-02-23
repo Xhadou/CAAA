@@ -130,7 +130,7 @@ Real-world microservice failure traces from [Zenodo](https://zenodo.org/records/
 | Sock Shop | 15 | Weaveworks' microservice demo |
 | Train Ticket | 64 | Large-scale train ticketing system |
 
-Download with `--download-data` and specify the dataset (`RE1` or `RE2`) and target system. Note: `RE3` is not currently available for download — only `RE1` and `RE2` have download URLs.
+Download with `--download-data` and specify the dataset (`RE1`, `RE2`, or `RE3`) and target system. Downloads use the [RCAEval](https://github.com/phamquiluan/RCAEval) package when installed (supports all datasets including RE3), falling back to direct Zenodo URL downloads for RE1/RE2.
 
 ## Performance Targets
 
@@ -159,7 +159,7 @@ pip install -r requirements.txt
 pip install -e ".[test]"
 ```
 
-**Requirements:** Python 3.9+, PyTorch 2.0+, scikit-learn 1.3+, NumPy, Pandas, SciPy, XGBoost, SHAP, ruptures, Matplotlib, Seaborn, PyYAML.
+**Requirements:** Python 3.9+, PyTorch 2.0+, scikit-learn 1.3+, NumPy, Pandas, SciPy, XGBoost, SHAP, ruptures, RCAEval, Matplotlib, Seaborn, PyYAML.
 
 Verify the installation:
 
@@ -248,6 +248,9 @@ CAAA can be evaluated on [RCAEval](https://zenodo.org/records/14590730) benchmar
 ```bash
 # Download dataset (one-time, requires network)
 python -m src.main --download-data --dataset RE1 --system online-boutique
+
+# Download RE3 dataset (requires RCAEval package from source)
+python -m src.main --download-data --dataset RE3 --system online-boutique
 
 # Train with real fault data + synthetic expected-load cases
 python -m src.main --data rcaeval --dataset RE1 --system online-boutique --model caaa
