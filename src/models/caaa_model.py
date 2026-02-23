@@ -72,6 +72,16 @@ class CAAAModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the full model.
 
+        The full 36-dim feature vector (including context dims 12-16) is
+        passed through the FeatureEncoder so that the encoder can learn
+        joint representations that capture interactions between context
+        and metric features.  Context features are *also* sliced out
+        separately and fed into the ContextIntegrationModule for
+        explicit attention and confidence gating.  This dual processing
+        is intentional: the encoder builds a context-entangled hidden
+        representation, while the gating module controls how much the
+        explicit context signal modulates the final prediction.
+
         Args:
             x: Input tensor of shape (batch, input_dim) containing
                 the full 36-dim feature vector.

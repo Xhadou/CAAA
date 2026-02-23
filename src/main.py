@@ -92,7 +92,7 @@ def run_pipeline(
         seed: Random seed.
         output_dir: Directory for saved results.
         data_source: ``"synthetic"`` or ``"rcaeval"``.
-        dataset: RCAEval dataset identifier (``"RE1"`` or ``"RE2"``).
+        dataset: RCAEval dataset identifier (``"RE1"``, ``"RE2"``, or ``"RE3"``).
         system: Microservice system for RCAEval.
         n_load_per_fault: Synthetic loads per RCAEval fault case.
         data_dir: Path to downloaded RCAEval data.
@@ -359,7 +359,7 @@ def main() -> None:
         help="Data source: synthetic (default) or rcaeval (real faults)",
     )
     parser.add_argument("--dataset", type=str, default="RE1",
-                        choices=["RE1", "RE2"], help="RCAEval dataset")
+                        choices=["RE1", "RE2", "RE3"], help="RCAEval dataset")
     parser.add_argument("--system", type=str, default="online-boutique",
                         choices=["online-boutique", "sock-shop", "train-ticket"],
                         help="Microservice system (for rcaeval)")

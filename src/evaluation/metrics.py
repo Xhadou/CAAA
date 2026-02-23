@@ -18,6 +18,17 @@ def compute_false_positive_rate(
     A false positive occurs when predicting FAULT (0) when the true label
     is EXPECTED_LOAD (1).
 
+    UNKNOWN handling:
+        Predictions of class 2 (UNKNOWN) are **not** counted as false
+        positives because the model explicitly deferred a decision.
+        This means a model that produces many UNKNOWN predictions will
+        report a lower FP rate than one that commits to a class for
+        every sample.  Use ``unknown_rate`` from
+        :func:`compute_all_metrics` alongside this metric to assess
+        coverage, or compute ``known_fp_rate`` (FP rate only over
+        samples with a definitive prediction) for a coverage-adjusted
+        view.
+
     Args:
         y_true: Ground truth labels.
         y_pred: Predicted labels.
@@ -136,6 +147,14 @@ def compute_all_metrics(
         "fault_recall": compute_fault_recall(y_true, y_pred),
         "unknown_rate": unknown_rate,
     }
+
+    # FP rate computed only over samples with a definitive prediction
+    if known_mask.sum() > 0:
+        metrics["known_fp_rate"] = compute_false_positive_rate(
+            y_true[known_mask], y_pred[known_mask]
+        )
+    else:
+        metrics["known_fp_rate"] = 0.0
 
     if baseline_fp_rate is not None:
         metrics["fp_reduction"] = compute_false_positive_reduction(

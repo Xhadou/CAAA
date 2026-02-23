@@ -9,12 +9,21 @@ via the ``ruptures`` library, inspired by BARO (FSE 2024) which showed that
 Bayesian change point detection before RCA improves results by 58-189%.
 """
 
+import functools
 import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
+
+try:
+    import ruptures as rpt
+except ImportError:
+    raise ImportError(
+        "ruptures is required for change-point detection features. "
+        "Install with: pip install ruptures"
+    )
 
 from src.data_loader.data_types import AnomalyCase, ServiceMetrics
 from src.features.feature_schema import (
@@ -52,6 +61,14 @@ def _linear_slope(arr: np.ndarray) -> float:
     return float(coeffs[0]) if np.isfinite(coeffs[0]) else 0.0
 
 
+@functools.lru_cache(maxsize=256)
+def _detect_change_point_cached(
+    series_tuple: Tuple[float, ...], penalty: float = 10,
+) -> Tuple[int, float, float]:
+    """Cached wrapper around :func:`_detect_change_point`."""
+    return _detect_change_point(np.array(series_tuple), penalty)
+
+
 def _detect_change_point(
     series: np.ndarray, penalty: float = 10,
 ) -> Tuple[int, float, float]:
@@ -79,8 +96,6 @@ def _detect_change_point(
             - *abruptness*: ``|gradient[cp]| / std`` — measures how sudden
               the change is.
     """
-    import ruptures as rpt
-
     if len(series) < 10:
         return -1, 0.0, 0.0
 
@@ -159,7 +174,7 @@ class FeatureExtractor:
         feats = np.concatenate([
             self._workload_features(case.services),
             self._behavioral_features(case.services),
-            self._context_features(case.context, case.services, case.label),
+            self._context_features(case.context, case.services),
             self._statistical_features(case.services),
             self._service_level_features(case.services),
         ])
@@ -245,7 +260,7 @@ class FeatureExtractor:
         magnitudes = []
         for svc in services:
             cpu = svc.metrics["cpu_usage"].values
-            _, mag, _ = _detect_change_point(cpu)
+            _, mag, _ = _detect_change_point_cached(tuple(cpu))
             magnitudes.append(mag)
         change_point_magnitude = float(np.mean(magnitudes))
 
@@ -271,7 +286,7 @@ class FeatureExtractor:
         abruptness_values = []
         for svc in services:
             cpu = svc.metrics["cpu_usage"].values
-            _, _, abruptness = _detect_change_point(cpu)
+            _, _, abruptness = _detect_change_point_cached(tuple(cpu))
             abruptness_values.append(abruptness)
         onset_gradient = float(np.mean(abruptness_values))
 
@@ -376,7 +391,6 @@ class FeatureExtractor:
         self,
         context: Optional[Dict],
         services: Optional[List[ServiceMetrics]] = None,
-        label: Optional[str] = None,
     ) -> np.ndarray:
         """Extract context features from an anomaly case.
 

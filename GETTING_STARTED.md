@@ -88,7 +88,13 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-This installs all required packages: PyTorch, scikit-learn, XGBoost, SHAP, NumPy, Pandas, Matplotlib, and more. See `requirements.txt` for the full list.
+This installs all required packages: PyTorch, scikit-learn, XGBoost, SHAP, ruptures, NumPy, Pandas, Matplotlib, and more. See `requirements.txt` for the full list.
+
+Alternatively, install as an editable package using `pyproject.toml` (includes all runtime dependencies):
+
+```bash
+pip install -e ".[test]"
+```
 
 ---
 
@@ -97,7 +103,7 @@ This installs all required packages: PyTorch, scikit-learn, XGBoost, SHAP, NumPy
 Run the following to confirm everything is installed correctly:
 
 ```bash
-python -c "import torch; import sklearn; import xgboost; import shap; print('All dependencies OK')"
+python -c "import torch; import sklearn; import xgboost; import shap; import ruptures; print('All dependencies OK')"
 ```
 
 You can also run the test suite to verify the codebase works:
@@ -153,15 +159,18 @@ Every experiment reports these key metrics:
 
 | Metric | What It Measures | Target |
 |--------|-----------------|--------|
-| **Accuracy** | Overall classification correctness | >80% |
-| **F1 Score** | Balance of precision and recall | Higher is better |
-| **FP Rate** | Fraction of load cases wrongly classified as faults | Lower is better |
+| **Accuracy** | Overall classification correctness (UNKNOWN counted as incorrect) | >80% |
+| **F1 Score** | Balance of precision and recall (on known predictions only) | Higher is better |
+| **FP Rate** | Fraction of load cases wrongly classified as faults (UNKNOWN excluded) | Lower is better |
+| **Known FP Rate** | FP rate computed only over samples with a definitive prediction | Lower is better |
 | **Fault Recall** | Fraction of actual faults correctly identified | >90% |
 | **FP Reduction** | Improvement in FP rate vs. a naive (no-context) baseline | >40% |
+| **Unknown Rate** | Fraction of predictions deferred as UNKNOWN | Context-dependent |
 
 **Interpreting the results:**
 - **High fault recall + low FP rate** = the model correctly identifies faults while not raising false alarms on legitimate load events.
 - **FP reduction >40%** means CAAA reduces false positives by at least 40% compared to a classifier that ignores context — this is the central research claim.
+- **Known FP Rate vs FP Rate**: When the model defers many predictions as UNKNOWN, the overall FP rate can appear artificially low. Use `known_fp_rate` for a coverage-adjusted view that only counts definitive predictions.
 
 ---
 
@@ -181,6 +190,16 @@ python scripts/train.py --n-fault 100 --n-load 100 --epochs 50 --baseline
 5. Saves the trained CAAA model to `models/final/caaa_model.pt`
 
 **Expected runtime:** ~5–10 minutes.
+
+### Training Features
+
+The CAAA trainer includes several features for stable, reproducible training:
+
+- **Gradient clipping** (default `max_grad_norm=1.0`): Prevents exploding gradients during training.
+- **ReduceLROnPlateau scheduler**: Automatically halves the learning rate when validation loss stops improving.
+- **Temperature calibration**: Post-hoc temperature scaling for calibrated confidence scores.
+- **StandardScaler**: Input features should be standardized before training. The entry points handle this automatically.
+- **Reproducible RNG**: All data generators use instance-level `np.random.default_rng(seed)` — multiple generators can coexist in the same process without corrupting each other's random state.
 
 ### Command-Line Options for `train.py`
 
@@ -457,6 +476,15 @@ Reliability diagrams show whether predicted probabilities match actual outcomes:
 - Points above the diagonal = under-confident, below = over-confident
 - Compare "uncalibrated" vs. "calibrated" (after temperature scaling) to see improvement
 
+### Interpreting the FP-vs-threshold curve
+
+The Coverage vs FP Rate trade-off plot (`plot_fp_vs_threshold`) shows two curves as a function of the confidence threshold:
+
+- **Coverage** (blue): Fraction of samples that receive a definitive (non-UNKNOWN) prediction
+- **FP Rate (known)** (red, dashed): False positive rate computed only over definitive predictions
+
+This is the key diagnostic for comparing fixed and adaptive threshold strategies. A good model maintains low FP rate even at high coverage levels.
+
 ---
 
 ## 12. Running Tests
@@ -521,6 +549,16 @@ Install missing dependencies:
 pip install -r requirements.txt
 ```
 
+### `ImportError: ruptures is required for change-point detection features`
+
+The `ruptures` library is required for the PELT change-point detection used in feature extraction. Install it with:
+
+```bash
+pip install ruptures>=1.1.0
+```
+
+Or reinstall all dependencies from `requirements.txt`.
+
 ### Tests fail with import errors
 
 Ensure you have activated your virtual environment:
@@ -551,6 +589,8 @@ The dataset is hosted on Zenodo. Ensure you have network access and try again:
 ```bash
 python -m src.main --download-data --dataset RE1 --system online-boutique
 ```
+
+All three dataset suites (RE1, RE2, RE3) are downloaded directly from Zenodo with no additional packages required.
 
 If behind a proxy, configure `HTTP_PROXY` and `HTTPS_PROXY` environment variables.
 
@@ -606,6 +646,10 @@ python -m src.main --data rcaeval --dataset RE1 --system online-boutique --model
 # 8. Ablation on real data
 python scripts/ablation.py --data rcaeval --dataset RE1 --system online-boutique \
     --epochs 50 --n-runs 5
+
+# 9. Evaluate on RE3 dataset
+python -m src.main --download-data --dataset RE3 --system online-boutique
+python -m src.main --data rcaeval --dataset RE3 --system online-boutique --model caaa
 ```
 
 ### Phase 5: Paper-Quality Results (~60–90 min)

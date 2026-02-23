@@ -77,6 +77,14 @@ The core CAAA model classifies detected anomalies:
 | **Context Integration Module** | Attention mechanism over 5 context features with learned confidence gating to modulate context influence |
 | **Classification Head** | 2-class output (FAULT vs EXPECTED_LOAD) with post-hoc UNKNOWN assignment via confidence thresholding |
 
+#### Dual Context Processing
+
+The full 36-dim feature vector (including context dims 12–16) is passed through the Feature Encoder so that the encoder can learn joint representations capturing interactions between context and metric features. Context features are *also* sliced out separately and fed into the Context Integration Module for explicit attention and confidence gating. This dual processing is intentional: the encoder builds a context-entangled hidden representation, while the gating module controls how much the explicit context signal modulates the final prediction.
+
+#### Confidence Gate Initialization
+
+The confidence gate in the Context Integration Module is initialized with `bias=1.0`, producing an initial sigmoid output of ≈0.73. This allows context features to flow through the gate by default rather than starting at an uninformative ≈0.5, improving early training dynamics.
+
 ### Context Consistency Loss
 
 The novel loss function combines three terms:
@@ -85,13 +93,15 @@ The novel loss function combines three terms:
 - **Context consistency penalty** — penalizes predictions that contradict available context signals (e.g., classifying as FAULT when a scheduled load event is active)
 - **Confidence calibration loss** — entropy regularization guided by context confidence scores
 
+**Penalty scale behavior:** When `event_active ≈ 0.5` and model probabilities are also ≈ 0.5, the per-sample consistency penalty approaches 1.0. With the default `alpha=0.3`, this contributes up to 0.3 to the total loss — comparable to the classification cross-entropy on well-separated data. The penalty therefore dominates early in training when the model is uncertain, and naturally diminishes as predictions become more confident.
+
 ## Feature Vector
 
 The system extracts a 36-dimensional feature vector organized into 5 groups, defined centrally in `src/features/feature_schema.py`:
 
 | Group | Dims | Features | Purpose |
 |-------|------|----------|---------|
-| **Workload** | 0–5 | `global_load_ratio`, `cpu_request_correlation`, `cross_service_sync`, `error_rate_delta`, `latency_cpu_correlation`, `memory_trend_uniformity` | Characterize whether metric changes correlate with workload |
+| **Workload** | 0–5 | `global_load_ratio`, `cpu_request_correlation`, `cross_service_sync`, `error_rate_delta`, `latency_cpu_correlation`, `change_point_magnitude` | Characterize whether metric changes correlate with workload |
 | **Behavioral** | 6–11 | `onset_gradient`, `peak_duration`, `cascade_score`, `recovery_indicator`, `affected_service_ratio`, `variance_change_ratio` | Capture fault propagation signatures vs. smooth load ramps |
 | **Context** | 12–16 | `event_active`, `event_expected_impact`, `time_seasonality`, `recent_deployment`, `context_confidence` | External context signals (the key innovation) |
 | **Statistical** | 17–29 | Mean/std of CPU, memory, requests, errors, latency, network; `max_error_rate` | Standard metric statistics |
@@ -120,7 +130,7 @@ Real-world microservice failure traces from [Zenodo](https://zenodo.org/records/
 | Sock Shop | 15 | Weaveworks' microservice demo |
 | Train Ticket | 64 | Large-scale train ticketing system |
 
-Download with `--download-data` and specify the dataset (`RE1`, `RE2`, `RE3`) and target system.
+Download with `--download-data` and specify the dataset (`RE1`, `RE2`, or `RE3`) and target system.
 
 ## Performance Targets
 
@@ -144,6 +154,9 @@ source venv/bin/activate  # Linux/macOS
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Or install as editable package (uses pyproject.toml)
+pip install -e ".[test]"
 ```
 
 **Requirements:** Python 3.9+, PyTorch 2.0+, scikit-learn 1.3+, NumPy, Pandas, SciPy, XGBoost, SHAP, ruptures, Matplotlib, Seaborn, PyYAML.
@@ -151,7 +164,7 @@ pip install -r requirements.txt
 Verify the installation:
 
 ```bash
-python -c "import torch; import sklearn; print('Setup OK')"
+python -c "import torch; import sklearn; import ruptures; print('Setup OK')"
 ```
 
 ## Quick Start
@@ -236,6 +249,9 @@ CAAA can be evaluated on [RCAEval](https://zenodo.org/records/14590730) benchmar
 # Download dataset (one-time, requires network)
 python -m src.main --download-data --dataset RE1 --system online-boutique
 
+# Download RE3 dataset
+python -m src.main --download-data --dataset RE3 --system online-boutique
+
 # Train with real fault data + synthetic expected-load cases
 python -m src.main --data rcaeval --dataset RE1 --system online-boutique --model caaa
 
@@ -287,11 +303,13 @@ Every experiment prints the following metrics to the console and logs them for a
 
 | Metric | Description |
 |--------|-------------|
-| **Accuracy** | Overall classification accuracy |
-| **F1 Score** | Harmonic mean of precision and recall |
-| **FP Rate** | False positive rate (loads misclassified as faults) |
+| **Accuracy** | Overall classification accuracy (UNKNOWN counted as incorrect) |
+| **F1 Score** | Harmonic mean of precision and recall (on known predictions only) |
+| **FP Rate** | False positive rate (loads misclassified as faults). UNKNOWN predictions are excluded — see `known_fp_rate` for a coverage-adjusted view |
+| **Known FP Rate** | FP rate computed only over samples with a definitive (non-UNKNOWN) prediction |
 | **Fault Recall** | Proportion of true faults correctly identified |
 | **FP Reduction** | Percentage improvement in FP rate vs. naive baseline |
+| **Unknown Rate** | Fraction of predictions that are UNKNOWN (model deferred the decision) |
 
 ### Interpreting Ablation Results
 
@@ -306,6 +324,7 @@ The ablation CSV (`outputs/results/ablation_results.csv`) contains mean ± stand
 - **SHAP plots** (`--shap` flag): Show which features contribute most to predictions, generated per model variant and per fault type
 - **Reliability diagrams** (`--calibration` flag): Show calibration before and after temperature scaling
 - **Confusion matrices**: Generated during training to show per-class performance
+- **FP-vs-threshold coverage curve**: Shows the trade-off between coverage (fraction of definitive predictions) and FP rate as a function of confidence threshold — key diagnostic for comparing fixed and adaptive threshold strategies
 
 ## Project Structure
 
@@ -325,7 +344,8 @@ CAAA/
 │   │   ├── fault_generator.py       # 11-type fault injection engine
 │   │   ├── dataset.py              # Combined & research dataset generation
 │   │   ├── download_data.py        # RCAEval dataset downloader
-│   │   └── rcaeval_loader.py       # RCAEval dataset parser
+│   │   ├── rcaeval_loader.py       # RCAEval dataset parser
+│   │   └── utils.py               # Shared base metrics generation utilities
 │   ├── features/
 │   │   ├── feature_schema.py       # Single source of truth for 36-dim layout
 │   │   ├── extractors.py           # Feature extraction from raw metrics
@@ -383,6 +403,16 @@ All model and training parameters are configurable via `configs/config.yaml`. Ke
 | `training.early_stopping_patience` | 10 | Epochs to wait before early stopping |
 | `training.test_split` | 0.2 | Fraction of data reserved for testing |
 | `training.val_split` | 0.1 | Fraction of training data for validation |
+
+### Training Features
+
+The trainer includes several features for stable and reliable training:
+
+- **Gradient clipping**: Applied by default with `max_grad_norm=1.0` to prevent exploding gradients.
+- **ReduceLROnPlateau scheduler**: Automatically halves the learning rate when validation loss plateaus (patience=5, min_lr=1e-6).
+- **StandardScaler**: Input features should be standardized (zero mean, unit variance) before training. Use `sklearn.preprocessing.StandardScaler` fitted on training data only.
+- **Temperature calibration**: Post-hoc temperature scaling for calibrated confidence scores, using validation data.
+- **Instance-level RNG**: All data generators use `np.random.default_rng(seed)` for per-instance reproducibility — multiple generators can coexist without corrupting each other's random state.
 
 ### Evaluation Parameters
 
