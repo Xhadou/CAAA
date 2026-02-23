@@ -80,8 +80,6 @@ class FaultGenerator:
         """
         self.n_services = n_services
         self.sequence_length = sequence_length
-        self._rng = np.random.RandomState(seed)
-        # Keep global seed for backward compat with code that uses np.random
         np.random.seed(seed)
 
     # ------------------------------------------------------------------
