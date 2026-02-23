@@ -683,7 +683,7 @@ def plot_fp_vs_threshold(
     ax2.plot(thresholds, fp_rates, color=color_fp, linestyle="--", label="FP Rate (known)")
     ax2.set_ylabel("FP Rate (definitive predictions only)", color=color_fp)
     ax2.tick_params(axis="y", labelcolor=color_fp)
-    ax2.set_ylim(0, max(max(fp_rates) * 1.2, 0.1) if fp_rates else 0.1)
+    ax2.set_ylim(0, max(max(fp_rates, default=0) * 1.2, 0.1))
 
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
