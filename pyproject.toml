@@ -22,7 +22,6 @@ dependencies = [
     "xgboost>=1.7.0",
     "shap>=0.42.0",
     "ruptures>=1.1.0",
-    "RCAEval @ git+https://github.com/phamquiluan/RCAEval.git",
 ]
 
 [project.optional-dependencies]

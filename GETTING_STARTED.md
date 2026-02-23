@@ -88,7 +88,7 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-This installs all required packages: PyTorch, scikit-learn, XGBoost, SHAP, ruptures, RCAEval, NumPy, Pandas, Matplotlib, and more. See `requirements.txt` for the full list.
+This installs all required packages: PyTorch, scikit-learn, XGBoost, SHAP, ruptures, NumPy, Pandas, Matplotlib, and more. See `requirements.txt` for the full list.
 
 Alternatively, install as an editable package using `pyproject.toml` (includes all runtime dependencies):
 
@@ -319,7 +319,7 @@ Available datasets and systems:
 |---------|-------------|
 | `RE1` | Primary benchmark dataset |
 | `RE2` | Extended dataset |
-| `RE3` | Additional fault scenarios (requires RCAEval package from source) |
+| `RE3` | Additional fault scenarios |
 
 | System | Services | Description |
 |--------|----------|-------------|
@@ -590,11 +590,7 @@ The dataset is hosted on Zenodo. Ensure you have network access and try again:
 python -m src.main --download-data --dataset RE1 --system online-boutique
 ```
 
-For RE3 support, install the RCAEval package from source:
-
-```bash
-pip install "RCAEval @ git+https://github.com/phamquiluan/RCAEval.git"
-```
+All three dataset suites (RE1, RE2, RE3) are downloaded directly from Zenodo with no additional packages required.
 
 If behind a proxy, configure `HTTP_PROXY` and `HTTPS_PROXY` environment variables.
 
@@ -651,7 +647,7 @@ python -m src.main --data rcaeval --dataset RE1 --system online-boutique --model
 python scripts/ablation.py --data rcaeval --dataset RE1 --system online-boutique \
     --epochs 50 --n-runs 5
 
-# 9. (Optional) Download and evaluate RE3 dataset
+# 9. Evaluate on RE3 dataset
 python -m src.main --download-data --dataset RE3 --system online-boutique
 python -m src.main --data rcaeval --dataset RE3 --system online-boutique --model caaa
 ```
