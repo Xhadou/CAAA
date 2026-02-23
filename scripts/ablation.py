@@ -247,8 +247,7 @@ def main():
             folds = list(skf.split(X, labels))
         else:
             # Single train/test split
-            from sklearn.model_selection import train_test_split as tts
-            train_idx, test_idx = tts(
+            train_idx, test_idx = train_test_split(
                 np.arange(len(labels)), test_size=0.2,
                 random_state=run_seed, stratify=labels,
             )
@@ -262,9 +261,9 @@ def main():
             y_train_all, y_test = labels[train_idx], labels[test_idx]
             fault_types_test = fault_types_all[test_idx]
 
-            # Split a validation set from training data for early stopping
-            from sklearn.model_selection import train_test_split as tts_inner
-            X_train_raw, X_val_raw, y_train, y_val = tts_inner(
+            # Split a validation set (12.5% of training data) for early
+            # stopping and calibration — mirrors the split in train.py.
+            X_train_raw, X_val_raw, y_train, y_val = train_test_split(
                 X_train_raw, y_train_all, test_size=0.125,
                 random_state=run_seed if not use_cv else args.base_seed,
                 stratify=y_train_all,

@@ -174,7 +174,7 @@ class FeatureExtractor:
         # results.  The seed is based on case_id when available, otherwise
         # on a monotonic counter (preserving batch-determinism).
         if case.case_id is not None:
-            case_seed = self._seed + hash(case.case_id) % (2**31)
+            case_seed = (self._seed + hash(case.case_id)) % (2**32)
         else:
             case_seed = self._seed + self._case_counter
         self._case_counter += 1
