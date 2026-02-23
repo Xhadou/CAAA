@@ -548,3 +548,42 @@ class TestLRScheduling:
         )
         assert "val_loss" in history
         assert len(history["val_loss"]) > 0
+
+
+# ── Ablation schema ranges ───────────────────────────────────────────
+
+class TestAblationSchemaRanges:
+    """Verify ablation script uses feature_schema ranges correctly."""
+
+    def test_schema_ranges_match_expected_indices(self):
+        """Feature schema ranges should match the documented layout."""
+        from src.features.feature_schema import (
+            CONTEXT_RANGE, BEHAVIORAL_RANGE, WORKLOAD_RANGE,
+            STATISTICAL_RANGE, SERVICE_LEVEL_RANGE,
+        )
+        assert WORKLOAD_RANGE == (0, 6)
+        assert BEHAVIORAL_RANGE == (6, 12)
+        assert CONTEXT_RANGE == (12, 17)
+        assert STATISTICAL_RANGE == (17, 30)
+        assert SERVICE_LEVEL_RANGE == (30, 36)
+
+    def test_ablation_imports_schema_constants(self):
+        """The ablation script should import from feature_schema, not hardcode."""
+        import ast
+        with open("scripts/ablation.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+        # Check that CONTEXT_RANGE (etc.) are imported
+        imports = [
+            node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        ]
+        schema_imports = [
+            imp for imp in imports
+            if imp.module and "feature_schema" in imp.module
+        ]
+        assert len(schema_imports) > 0, "ablation.py should import from feature_schema"
+        imported_names = []
+        for imp in schema_imports:
+            imported_names.extend(alias.name for alias in imp.names)
+        assert "CONTEXT_RANGE" in imported_names
+        assert "BEHAVIORAL_RANGE" in imported_names
