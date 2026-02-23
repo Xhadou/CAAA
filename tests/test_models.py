@@ -60,6 +60,11 @@ class TestFeatureEncoder:
         out = feature_encoder(x)
         assert out.shape == (1, 64)
 
+    def test_feature_encoder_has_layer_norm(self, feature_encoder):
+        """FeatureEncoder should include LayerNorm for stable training."""
+        has_ln = any(isinstance(m, nn.LayerNorm) for m in feature_encoder.modules())
+        assert has_ln, "FeatureEncoder should contain LayerNorm layers"
+
 
 # ── ContextIntegrationModule ─────────────────────────────────────────
 
