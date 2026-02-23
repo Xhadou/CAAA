@@ -9,12 +9,20 @@ import sys
 import numpy as np
 import torch
 from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.preprocessing import StandardScaler
 
 # Fallback for running without `pip install -e .`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.data_loader import generate_combined_dataset, generate_rcaeval_dataset
 from src.features import FeatureExtractor
+from src.features.feature_schema import (
+    CONTEXT_RANGE,
+    BEHAVIORAL_RANGE,
+    WORKLOAD_RANGE,
+    STATISTICAL_RANGE,
+    SERVICE_LEVEL_RANGE,
+)
 from src.models import CAAAModel, BaselineClassifier, NaiveBaseline, RuleBasedBaseline, XGBoostBaseline
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import (
@@ -25,7 +33,8 @@ from src.evaluation.metrics import (
 
 def run_caaa_variant(
     X_train, y_train, X_test, y_test, naive_fp, epochs, batch_size, lr,
-    use_context_loss=True, loss_type="context_consistency", seed=42
+    use_context_loss=True, loss_type="context_consistency", seed=42,
+    X_val=None, y_val=None,
 ):
     """Train and evaluate a CAAA model variant.
 
@@ -42,6 +51,8 @@ def run_caaa_variant(
         loss_type: Loss function variant (context_consistency, contrastive,
             or cross_entropy).
         seed: Random seed.
+        X_val: Optional validation features for early stopping.
+        y_val: Optional validation labels for early stopping.
 
     Returns:
         Dictionary of evaluation metrics.
@@ -53,9 +64,12 @@ def run_caaa_variant(
         use_context_loss=use_context_loss,
         loss_type=loss_type,
     )
+    early_stopping_patience = 10 if X_val is not None else epochs
     trainer.train(
-        X_train, y_train, epochs=epochs,
-        batch_size=batch_size, early_stopping_patience=epochs,
+        X_train, y_train,
+        X_val=X_val, y_val=y_val,
+        epochs=epochs,
+        batch_size=batch_size, early_stopping_patience=early_stopping_patience,
     )
     y_pred = trainer.predict(X_test)
     return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
@@ -244,9 +258,27 @@ def main():
             if use_cv:
                 print(f"\n--- Fold {fold_idx + 1}/{args.cv_folds} ---")
 
-            X_train, X_test = X[train_idx], X[test_idx]
-            y_train, y_test = labels[train_idx], labels[test_idx]
+            X_train_raw, X_test_raw = X[train_idx], X[test_idx]
+            y_train_all, y_test = labels[train_idx], labels[test_idx]
             fault_types_test = fault_types_all[test_idx]
+
+            # Split a validation set from training data for early stopping
+            from sklearn.model_selection import train_test_split as tts_inner
+            X_train_raw, X_val_raw, y_train, y_val = tts_inner(
+                X_train_raw, y_train_all, test_size=0.125,
+                random_state=run_seed if not use_cv else args.base_seed,
+                stratify=y_train_all,
+            )
+
+            # Scale features (fit on train only) for neural models
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train_raw).astype(np.float32)
+            X_val = scaler.transform(X_val_raw).astype(np.float32)
+            X_test = scaler.transform(X_test_raw).astype(np.float32)
+
+            # Keep unscaled copies for tree-based baselines (scale-invariant)
+            X_train_unscaled = X_train_raw
+            X_test_unscaled = X_test_raw
 
             # Naive baseline FP rate
             naive = NaiveBaseline()
@@ -259,6 +291,7 @@ def main():
                 X_train, y_train, X_test, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
+                X_val=X_val, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["Full CAAA"][k].append(m.get(k, 0.0))
@@ -269,20 +302,25 @@ def main():
                 X_train, y_train, X_test, y_test, naive_fp,
                 args.epochs, max(args.batch_size, 16), args.lr,
                 loss_type="contrastive", seed=run_seed,
+                X_val=X_val, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["CAAA + Contrastive"][k].append(m.get(k, 0.0))
 
             # --- No Context Features ---
             print("  No Context Features...")
+            ctx_s, ctx_e = CONTEXT_RANGE
             X_train_nc = X_train.copy()
             X_test_nc = X_test.copy()
-            X_train_nc[:, 12:17] = 0.0
-            X_test_nc[:, 12:17] = 0.0
+            X_val_nc = X_val.copy()
+            X_train_nc[:, ctx_s:ctx_e] = 0.0
+            X_test_nc[:, ctx_s:ctx_e] = 0.0
+            X_val_nc[:, ctx_s:ctx_e] = 0.0
             m = run_caaa_variant(
                 X_train_nc, y_train, X_test_nc, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
+                X_val=X_val_nc, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["No Context Features"][k].append(m.get(k, 0.0))
@@ -293,36 +331,48 @@ def main():
                 X_train, y_train, X_test, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=False, seed=run_seed,
+                X_val=X_val, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["No Context Loss"][k].append(m.get(k, 0.0))
 
             # --- No Behavioral Features ---
             print("  No Behavioral...")
+            beh_s, beh_e = BEHAVIORAL_RANGE
             X_train_nb = X_train.copy()
             X_test_nb = X_test.copy()
-            X_train_nb[:, 6:12] = 0.0
-            X_test_nb[:, 6:12] = 0.0
+            X_val_nb = X_val.copy()
+            X_train_nb[:, beh_s:beh_e] = 0.0
+            X_test_nb[:, beh_s:beh_e] = 0.0
+            X_val_nb[:, beh_s:beh_e] = 0.0
             m = run_caaa_variant(
                 X_train_nb, y_train, X_test_nb, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
+                X_val=X_val_nb, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["No Behavioral"][k].append(m.get(k, 0.0))
 
             # --- Context Features Only ---
             print("  Context Only...")
+            wkl_s, wkl_e = WORKLOAD_RANGE
+            stat_s, stat_e = STATISTICAL_RANGE
+            svc_s, svc_e = SERVICE_LEVEL_RANGE
             X_train_co = X_train.copy()
             X_test_co = X_test.copy()
-            X_train_co[:, :12] = 0.0
-            X_train_co[:, 17:] = 0.0
-            X_test_co[:, :12] = 0.0
-            X_test_co[:, 17:] = 0.0
+            X_val_co = X_val.copy()
+            X_train_co[:, wkl_s:beh_e] = 0.0  # zero workload + behavioral
+            X_train_co[:, stat_s:svc_e] = 0.0  # zero statistical + service-level
+            X_test_co[:, wkl_s:beh_e] = 0.0
+            X_test_co[:, stat_s:svc_e] = 0.0
+            X_val_co[:, wkl_s:beh_e] = 0.0
+            X_val_co[:, stat_s:svc_e] = 0.0
             m = run_caaa_variant(
                 X_train_co, y_train, X_test_co, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
+                X_val=X_val_co, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["Context Only"][k].append(m.get(k, 0.0))
@@ -331,16 +381,20 @@ def main():
             print("  Statistical Only...")
             X_train_so = X_train.copy()
             X_test_so = X_test.copy()
-            # Zero out workload [0:6], behavioral [6:12], context [12:17],
-            # and service-level [30:36]; keep only statistical [17:30]
-            X_train_so[:, :17] = 0.0
-            X_train_so[:, 30:] = 0.0
-            X_test_so[:, :17] = 0.0
-            X_test_so[:, 30:] = 0.0
+            X_val_so = X_val.copy()
+            # Zero out workload, behavioral, context, and service-level;
+            # keep only statistical
+            X_train_so[:, :stat_s] = 0.0
+            X_train_so[:, stat_e:] = 0.0
+            X_test_so[:, :stat_s] = 0.0
+            X_test_so[:, stat_e:] = 0.0
+            X_val_so[:, :stat_s] = 0.0
+            X_val_so[:, stat_e:] = 0.0
             m = run_caaa_variant(
                 X_train_so, y_train, X_test_so, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=False, seed=run_seed,
+                X_val=X_val_so, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["Statistical Only"][k].append(m.get(k, 0.0))
@@ -349,39 +403,42 @@ def main():
             print("  Stat + Service-Level...")
             X_train_ssl = X_train.copy()
             X_test_ssl = X_test.copy()
-            # Zero out workload [0:6], behavioral [6:12], context [12:17];
-            # keep statistical [17:30] and service-level [30:36]
-            X_train_ssl[:, :17] = 0.0
-            X_test_ssl[:, :17] = 0.0
+            X_val_ssl = X_val.copy()
+            # Zero out workload, behavioral, context;
+            # keep statistical and service-level
+            X_train_ssl[:, :stat_s] = 0.0
+            X_test_ssl[:, :stat_s] = 0.0
+            X_val_ssl[:, :stat_s] = 0.0
             m = run_caaa_variant(
                 X_train_ssl, y_train, X_test_ssl, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=False, seed=run_seed,
+                X_val=X_val_ssl, y_val=y_val,
             )
             for k in metrics_to_track:
                 all_results["Stat + Service-Level"][k].append(m.get(k, 0.0))
 
-            # --- Baseline RF ---
+            # --- Baseline RF (scale-invariant, uses unscaled features) ---
             print("  Baseline RF...")
-            m = run_baseline_rf(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
+            m = run_baseline_rf(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["Baseline RF"][k].append(m.get(k, 0.0))
 
-            # --- XGBoost ---
+            # --- XGBoost (scale-invariant, uses unscaled features) ---
             print("  XGBoost...")
-            m = run_xgboost(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
+            m = run_xgboost(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["XGBoost"][k].append(m.get(k, 0.0))
 
-            # --- Rule-Based ---
+            # --- Rule-Based (uses unscaled features) ---
             print("  Rule-Based...")
-            m = run_rule_based(X_train, y_train, X_test, y_test, naive_fp)
+            m = run_rule_based(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp)
             for k in metrics_to_track:
                 all_results["Rule-Based"][k].append(m.get(k, 0.0))
 
             # --- Naive ---
             print("  Naive...")
-            m = run_naive(X_test, y_test, naive_fp)
+            m = run_naive(X_test_unscaled, y_test, naive_fp)
             for k in metrics_to_track:
                 all_results["Naive"][k].append(m.get(k, 0.0))
 
@@ -430,8 +487,10 @@ def main():
         use_context_loss=True,
     )
     _ft_trainer.train(
-        X_train, y_train, epochs=args.epochs,
-        batch_size=args.batch_size, early_stopping_patience=args.epochs,
+        X_train, y_train,
+        X_val=X_val, y_val=y_val,
+        epochs=args.epochs,
+        batch_size=args.batch_size, early_stopping_patience=10,
     )
     _ft_pred = _ft_trainer.predict(X_test)
 
@@ -481,20 +540,20 @@ def main():
         os.makedirs(shap_dir, exist_ok=True)
         print("\nGenerating SHAP plots on last fold data...")
 
-        # Baseline RF (fast)
+        # Baseline RF (fast, uses unscaled features)
         print("  Baseline RF SHAP...")
         rf = BaselineClassifier(random_state=args.base_seed)
-        rf.fit(X_train, y_train)
+        rf.fit(X_train_unscaled, y_train)
         plot_shap_summary(
-            rf, X_test, ALL_FEATURE_NAMES,
+            rf, X_test_unscaled, ALL_FEATURE_NAMES,
             save_path=os.path.join(shap_dir, "shap_baseline_rf.png"),
         )
         plot_shap_by_class(
-            rf, X_test, y_test, ALL_FEATURE_NAMES,
+            rf, X_test_unscaled, y_test, ALL_FEATURE_NAMES,
             save_path=os.path.join(shap_dir, "shap_baseline_rf_by_class.png"),
         )
         plot_shap_by_fault_type(
-            rf, X_test, list(fault_types_test), ALL_FEATURE_NAMES,
+            rf, X_test_unscaled, list(fault_types_test), ALL_FEATURE_NAMES,
             save_path=os.path.join(shap_dir, "shap_baseline_rf_by_fault_type.png"),
         )
         print(f"  Saved to {shap_dir}/shap_baseline_rf*.png")
@@ -508,8 +567,10 @@ def main():
             use_context_loss=True,
         )
         caaa_trainer.train(
-            X_train, y_train, epochs=args.epochs,
-            batch_size=args.batch_size, early_stopping_patience=args.epochs,
+            X_train, y_train,
+            X_val=X_val, y_val=y_val,
+            epochs=args.epochs,
+            batch_size=args.batch_size, early_stopping_patience=10,
         )
         plot_shap_summary(
             caaa_trainer, X_test, ALL_FEATURE_NAMES,
@@ -540,8 +601,10 @@ def main():
             use_context_loss=True,
         )
         cal_trainer.train(
-            X_train, y_train, epochs=args.epochs,
-            batch_size=args.batch_size, early_stopping_patience=args.epochs,
+            X_train, y_train,
+            X_val=X_val, y_val=y_val,
+            epochs=args.epochs,
+            batch_size=args.batch_size, early_stopping_patience=10,
         )
 
         # Before temperature scaling
@@ -554,8 +617,8 @@ def main():
         )
         print(f"  ECE (uncalibrated): {ece_uncal:.4f}")
 
-        # After temperature scaling
-        T = cal_trainer.calibrate_temperature(X_test, y_test)
+        # Calibrate temperature on held-out validation set (NOT test set)
+        T = cal_trainer.calibrate_temperature(X_val, y_val)
         proba_cal = cal_trainer.predict_proba(X_test)
         ece_cal, _, _, _ = compute_expected_calibration_error(y_test, proba_cal)
         plot_reliability_diagram(
