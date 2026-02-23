@@ -227,7 +227,7 @@ class TestFaultGenerator:
 class TestCombinedDataset:
     def test_generate_combined_dataset(self):
         fault_cases, load_cases = generate_combined_dataset(
-            n_fault=5, n_load=5, seed=42
+            n_fault=5, n_load=5, seed=42, include_hard=False,
         )
         assert len(fault_cases) == 5
         assert len(load_cases) == 5
@@ -237,7 +237,7 @@ class TestCombinedDataset:
     def test_generate_combined_dataset_multiple_systems(self):
         systems = ["online-boutique", "sock-shop"]
         fault_cases, load_cases = generate_combined_dataset(
-            n_fault=4, n_load=4, systems=systems, seed=7
+            n_fault=4, n_load=4, systems=systems, seed=7, include_hard=False,
         )
         assert len(fault_cases) == 4
         assert len(load_cases) == 4
@@ -254,7 +254,7 @@ class TestCombinedDataset:
 
     def test_single_case(self):
         fault_cases, load_cases = generate_combined_dataset(
-            n_fault=1, n_load=1, seed=2
+            n_fault=1, n_load=1, seed=2, include_hard=False,
         )
         assert len(fault_cases) == 1
         assert len(load_cases) == 1
@@ -333,9 +333,9 @@ class TestHardDataset:
     def test_generate_hard_dataset_counts(self):
         """Verify correct number of fault and load cases."""
         fault_cases, load_cases = generate_hard_dataset(n_per_type=3, seed=42)
-        # 2 fault types × 3 = 6 fault cases
-        assert len(fault_cases) == 6
-        # 2 load types × 3 = 6 load cases
+        # 3 fault types (fault_during_event, gradual_fault, correlated_fault) × 3 = 9
+        assert len(fault_cases) == 9
+        # 2 load types (capacity_exceeded_load, partial_load) × 3 = 6
         assert len(load_cases) == 6
 
     def test_hard_dataset_labels(self):
@@ -396,12 +396,31 @@ class TestHardDataset:
             assert "event_type" in case.context
 
     def test_hard_scenario_types_constant(self):
-        """Verify the HARD_SCENARIO_TYPES constant."""
-        assert len(HARD_SCENARIO_TYPES) == 4
+        """Verify the HARD_SCENARIO_TYPES constant has all 5 types."""
+        assert len(HARD_SCENARIO_TYPES) == 5
         assert "fault_during_event" in HARD_SCENARIO_TYPES
         assert "capacity_exceeded_load" in HARD_SCENARIO_TYPES
         assert "gradual_fault" in HARD_SCENARIO_TYPES
+        assert "correlated_fault" in HARD_SCENARIO_TYPES
         assert "partial_load" in HARD_SCENARIO_TYPES
+
+    def test_correlated_fault_multiple_services_affected(self):
+        """CORRELATED_FAULT cases should have 2+ services with elevated error rates."""
+        fault_cases, _ = generate_hard_dataset(n_per_type=3, seed=42)
+        cf_cases = [c for c in fault_cases if "correlated_fault" in c.case_id]
+        assert len(cf_cases) == 3
+        for case in cf_cases:
+            assert case.fault_service is not None
+            assert case.fault_type is not None
+            # Count services with mean error_rate > 0.05 (elevated)
+            elevated_services = [
+                svc.service_name for svc in case.services
+                if svc.metrics["error_rate"].mean() > 0.05
+            ]
+            assert len(elevated_services) >= 2, (
+                f"Expected 2+ elevated services, got {len(elevated_services)}: "
+                f"{elevated_services}"
+            )
 
 
 class TestCombinedDatasetWithHard:
@@ -417,7 +436,7 @@ class TestCombinedDatasetWithHard:
                     if c.case_id.startswith("hard_")]
         assert len(hard_ids) > 0
 
-    def test_include_hard_false_default(self):
+    def test_include_hard_false_explicit(self):
         """When include_hard=False, no hard cases should appear."""
         fault_cases, load_cases = generate_combined_dataset(
             n_fault=10, n_load=10, seed=42, include_hard=False,
@@ -425,3 +444,12 @@ class TestCombinedDatasetWithHard:
         hard_ids = [c.case_id for c in fault_cases + load_cases
                     if c.case_id.startswith("hard_")]
         assert len(hard_ids) == 0
+
+    def test_include_hard_true_default(self):
+        """Default include_hard=True should include hard cases."""
+        fault_cases, load_cases = generate_combined_dataset(
+            n_fault=20, n_load=20, seed=42,
+        )
+        hard_ids = [c.case_id for c in fault_cases + load_cases
+                    if c.case_id.startswith("hard_")]
+        assert len(hard_ids) > 0

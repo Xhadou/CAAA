@@ -168,6 +168,8 @@ def main():
                         help="Number of CV folds (0 = use n-runs with train/test split)")
     parser.add_argument("--shap", action="store_true",
                         help="Generate SHAP plots for Full CAAA and Baseline RF")
+    parser.add_argument("--calibration", action="store_true",
+                        help="Generate reliability diagrams comparing ECE before/after temperature scaling")
 
     args = parser.parse_args()
 
@@ -181,6 +183,8 @@ def main():
         "No Context Loss",
         "No Behavioral",
         "Context Only",
+        "Statistical Only",
+        "Stat + Service-Level",
         "Baseline RF",
         "XGBoost",
         "Rule-Based",
@@ -216,6 +220,7 @@ def main():
             )
         all_cases = fault_cases + load_cases
         labels = np.array([0 if c.label == "FAULT" else 1 for c in all_cases])
+        fault_types_all = np.array([c.fault_type for c in all_cases])
 
         extractor = FeatureExtractor()
         X = extractor.extract_batch(all_cases).astype(np.float32)
@@ -241,6 +246,7 @@ def main():
 
             X_train, X_test = X[train_idx], X[test_idx]
             y_train, y_test = labels[train_idx], labels[test_idx]
+            fault_types_test = fault_types_all[test_idx]
 
             # Naive baseline FP rate
             naive = NaiveBaseline()
@@ -321,6 +327,40 @@ def main():
             for k in metrics_to_track:
                 all_results["Context Only"][k].append(m.get(k, 0.0))
 
+            # --- Statistical Features Only ---
+            print("  Statistical Only...")
+            X_train_so = X_train.copy()
+            X_test_so = X_test.copy()
+            # Zero out workload [0:6], behavioral [6:12], context [12:17],
+            # and service-level [30:36]; keep only statistical [17:30]
+            X_train_so[:, :17] = 0.0
+            X_train_so[:, 30:] = 0.0
+            X_test_so[:, :17] = 0.0
+            X_test_so[:, 30:] = 0.0
+            m = run_caaa_variant(
+                X_train_so, y_train, X_test_so, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr,
+                use_context_loss=False, seed=run_seed,
+            )
+            for k in metrics_to_track:
+                all_results["Statistical Only"][k].append(m.get(k, 0.0))
+
+            # --- Statistical + Service-Level ---
+            print("  Stat + Service-Level...")
+            X_train_ssl = X_train.copy()
+            X_test_ssl = X_test.copy()
+            # Zero out workload [0:6], behavioral [6:12], context [12:17];
+            # keep statistical [17:30] and service-level [30:36]
+            X_train_ssl[:, :17] = 0.0
+            X_test_ssl[:, :17] = 0.0
+            m = run_caaa_variant(
+                X_train_ssl, y_train, X_test_ssl, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr,
+                use_context_loss=False, seed=run_seed,
+            )
+            for k in metrics_to_track:
+                all_results["Stat + Service-Level"][k].append(m.get(k, 0.0))
+
             # --- Baseline RF ---
             print("  Baseline RF...")
             m = run_baseline_rf(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
@@ -374,6 +414,44 @@ def main():
         print(f"{v:<22s}{acc:>14s}{f1:>14s}{fpr:>14s}{fr:>14s}{fpred:>14s}")
     print("=" * 100)
 
+    # Per-fault-type breakdown for Full CAAA on last fold
+    print()
+    print("=" * 80)
+    print("PER-FAULT-TYPE BREAKDOWN (Full CAAA, last fold)")
+    print("=" * 80)
+    print(f"{'Fault Type':<30s}{'Count':>8s}{'Accuracy':>12s}{'Recall':>12s}{'Misclass→LOAD':>15s}")
+    print("-" * 80)
+
+    # Re-run Full CAAA on last fold to get predictions for breakdown
+    torch.manual_seed(args.base_seed)
+    _ft_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+    _ft_trainer = CAAATrainer(
+        _ft_model, learning_rate=args.lr, device="cpu",
+        use_context_loss=True,
+    )
+    _ft_trainer.train(
+        X_train, y_train, epochs=args.epochs,
+        batch_size=args.batch_size, early_stopping_patience=args.epochs,
+    )
+    _ft_pred = _ft_trainer.predict(X_test)
+
+    unique_ft = sorted(set(ft for ft in fault_types_test if ft is not None))
+    for ft in unique_ft:
+        ft_mask = fault_types_test == ft
+        if ft_mask.sum() == 0:
+            continue
+        y_true_ft = y_test[ft_mask]
+        y_pred_ft = _ft_pred[ft_mask]
+        count = int(ft_mask.sum())
+        acc = float((y_true_ft == y_pred_ft).mean())
+        # Recall: fraction of true-FAULT correctly predicted as FAULT
+        fault_mask = y_true_ft == 0
+        recall = float((y_pred_ft[fault_mask] == 0).mean()) if fault_mask.sum() > 0 else 0.0
+        # Misclassification as EXPECTED_LOAD
+        misclass = float((y_pred_ft[fault_mask] == 1).mean()) if fault_mask.sum() > 0 else 0.0
+        print(f"{ft:<30s}{count:>8d}{acc:>12.3f}{recall:>12.3f}{misclass:>15.3f}")
+    print("=" * 80)
+
     # Save CSV
     csv_dir = "outputs/results"
     os.makedirs(csv_dir, exist_ok=True)
@@ -395,7 +473,9 @@ def main():
     # SHAP analysis (optional, on last fold/run's data)
     if args.shap:
         from src.features.feature_schema import ALL_FEATURE_NAMES
-        from src.evaluation.visualization import plot_shap_summary, plot_shap_by_class
+        from src.evaluation.visualization import (
+            plot_shap_summary, plot_shap_by_class, plot_shap_by_fault_type,
+        )
 
         shap_dir = os.path.join(csv_dir, "shap")
         os.makedirs(shap_dir, exist_ok=True)
@@ -412,6 +492,10 @@ def main():
         plot_shap_by_class(
             rf, X_test, y_test, ALL_FEATURE_NAMES,
             save_path=os.path.join(shap_dir, "shap_baseline_rf_by_class.png"),
+        )
+        plot_shap_by_fault_type(
+            rf, X_test, list(fault_types_test), ALL_FEATURE_NAMES,
+            save_path=os.path.join(shap_dir, "shap_baseline_rf_by_fault_type.png"),
         )
         print(f"  Saved to {shap_dir}/shap_baseline_rf*.png")
 
@@ -432,7 +516,56 @@ def main():
             save_path=os.path.join(shap_dir, "shap_full_caaa.png"),
             X_background=X_train[:50],
         )
-        print(f"  Saved to {shap_dir}/shap_full_caaa.png")
+        plot_shap_by_fault_type(
+            caaa_trainer, X_test, list(fault_types_test), ALL_FEATURE_NAMES,
+            save_path=os.path.join(shap_dir, "shap_full_caaa_by_fault_type.png"),
+            X_background=X_train[:50],
+        )
+        print(f"  Saved to {shap_dir}/shap_full_caaa*.png")
+
+    # Calibration evaluation (optional, on last fold/run's data)
+    if args.calibration:
+        from src.evaluation.metrics import compute_expected_calibration_error
+        from src.evaluation.visualization import plot_reliability_diagram
+
+        cal_dir = os.path.join(csv_dir, "calibration")
+        os.makedirs(cal_dir, exist_ok=True)
+        print("\nCalibration evaluation on last fold data...")
+
+        # Train a fresh Full CAAA model for calibration analysis
+        torch.manual_seed(args.base_seed)
+        cal_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        cal_trainer = CAAATrainer(
+            cal_model, learning_rate=args.lr, device="cpu",
+            use_context_loss=True,
+        )
+        cal_trainer.train(
+            X_train, y_train, epochs=args.epochs,
+            batch_size=args.batch_size, early_stopping_patience=args.epochs,
+        )
+
+        # Before temperature scaling
+        proba_uncal = cal_trainer.predict_proba(X_test)
+        ece_uncal, _, _, _ = compute_expected_calibration_error(y_test, proba_uncal)
+        plot_reliability_diagram(
+            y_test, proba_uncal, n_bins=10,
+            save_path=os.path.join(cal_dir, "reliability_uncalibrated.png"),
+            title="Before Temperature Scaling",
+        )
+        print(f"  ECE (uncalibrated): {ece_uncal:.4f}")
+
+        # After temperature scaling
+        T = cal_trainer.calibrate_temperature(X_test, y_test)
+        proba_cal = cal_trainer.predict_proba(X_test)
+        ece_cal, _, _, _ = compute_expected_calibration_error(y_test, proba_cal)
+        plot_reliability_diagram(
+            y_test, proba_cal, n_bins=10,
+            save_path=os.path.join(cal_dir, "reliability_calibrated.png"),
+            title=f"After Temperature Scaling (T={T:.3f})",
+        )
+        print(f"  ECE (calibrated):   {ece_cal:.4f}")
+        print(f"  Temperature:        {T:.4f}")
+        print(f"  Saved to {cal_dir}/")
 
 
 if __name__ == "__main__":

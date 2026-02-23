@@ -549,3 +549,68 @@ def plot_shap_by_fault_type(
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info("SHAP by-fault-type plot saved to %s", save_path)
     plt.close(fig)
+
+
+def plot_reliability_diagram(
+    y_true: np.ndarray,
+    proba: np.ndarray,
+    n_bins: int = 10,
+    save_path: Optional[str] = None,
+    title: str = "Reliability Diagram",
+) -> None:
+    """Plot a calibration reliability diagram with prediction histogram.
+
+    Two-panel figure: (left) calibration curve showing mean predicted
+    confidence vs actual accuracy per bin; (right) histogram of prediction
+    counts per confidence bin.
+
+    Args:
+        y_true: Ground truth labels of shape (n_samples,).
+        proba: Predicted probabilities of shape (n_samples, n_classes).
+        n_bins: Number of confidence bins.
+        save_path: Path to save the figure.
+        title: Figure title.
+    """
+    from src.evaluation.metrics import compute_expected_calibration_error
+
+    ece, bin_accs, bin_confs, bin_counts = compute_expected_calibration_error(
+        y_true, proba, n_bins=n_bins,
+    )
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    bin_centers = np.linspace(1.0 / (2 * n_bins), 1.0 - 1.0 / (2 * n_bins), n_bins)
+
+    # Calibration curve
+    ax1.plot([0, 1], [0, 1], "k--", label="Perfect calibration")
+    mask = bin_counts > 0
+    ax1.bar(
+        bin_centers[mask], bin_accs[mask], width=1.0 / n_bins,
+        alpha=0.6, color="#3498db", edgecolor="black", linewidth=0.5,
+        label="Model",
+    )
+    ax1.set_xlabel("Mean Predicted Confidence")
+    ax1.set_ylabel("Fraction of Positives (Accuracy)")
+    ax1.set_title(f"{title}  (ECE = {ece:.4f})")
+    ax1.legend(loc="upper left")
+    ax1.set_xlim(0, 1)
+    ax1.set_ylim(0, 1)
+    ax1.grid(True, alpha=0.3)
+
+    # Prediction histogram
+    ax2.bar(
+        bin_centers, bin_counts, width=1.0 / n_bins,
+        alpha=0.6, color="#f39c12", edgecolor="black", linewidth=0.5,
+    )
+    ax2.set_xlabel("Mean Predicted Confidence")
+    ax2.set_ylabel("Count")
+    ax2.set_title("Prediction Count per Bin")
+    ax2.set_xlim(0, 1)
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if save_path:
+        _ensure_parent_dir(save_path)
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        logger.info("Reliability diagram saved to %s", save_path)
+    plt.close(fig)

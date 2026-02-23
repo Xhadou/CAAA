@@ -175,6 +175,21 @@ class TestContextConsistencyLoss:
 
         npt.assert_allclose(total_loss.item(), ce_loss.item(), atol=1e-6)
 
+    def test_context_confidence_zero_nullifies_consistency(self):
+        """When context_confidence=0 for all samples, consistency_loss should be ~0."""
+        torch.manual_seed(42)
+        ccl = ContextConsistencyLoss(alpha=0.3, beta=0.1)
+
+        logits = torch.randn(8, 2)
+        labels = torch.randint(0, 2, (8,))
+        context = torch.rand(8, 5)
+        context[:, 4] = 0.0  # zero out context_confidence
+
+        _, components = ccl(logits, labels, context)
+
+        npt.assert_allclose(components["consistency_loss"], 0.0, atol=1e-7)
+        npt.assert_allclose(components["calibration_loss"], 0.0, atol=1e-7)
+
 
 class TestTemperatureScaling:
     """Test post-hoc temperature calibration."""
@@ -285,6 +300,22 @@ class TestSupConContextLoss:
             if param.requires_grad:
                 assert param.grad is not None, f"No gradient for {name}"
                 assert torch.isfinite(param.grad).all(), f"Non-finite grad for {name}"
+
+    def test_supcon_single_class_batch(self):
+        """All-same-class batch should produce finite loss (no NaN)."""
+        torch.manual_seed(42)
+        loss_fn = SupConContextLoss()
+
+        embeddings = torch.randn(8, 64)
+        logits = torch.randn(8, 2)
+        labels = torch.zeros(8, dtype=torch.long)  # all class 0
+        context = torch.rand(8, 5)
+
+        total_loss, components = loss_fn(embeddings, logits, labels, context)
+
+        assert total_loss.shape == ()
+        assert torch.isfinite(total_loss), "Loss should be finite for single-class batch"
+        assert components["contrastive_loss"] >= 0.0
 
 
 class TestContrastiveTraining:
