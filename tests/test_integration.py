@@ -476,3 +476,75 @@ class TestAdaptiveThreshold:
             # With varying context confidence, adaptive should differ from fixed
             assert not np.array_equal(preds_fixed, preds_adaptive), \
                 "Adaptive and fixed should differ with varying context_confidence"
+
+
+class TestGradientClipping:
+    """Test that gradient clipping is applied during training."""
+
+    def test_gradient_clipping_enabled(self):
+        """Trainer should have gradient clipping enabled by default."""
+        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001)
+        assert trainer.max_grad_norm == 1.0
+
+    def test_gradient_clipping_custom(self):
+        """Trainer should accept custom max_grad_norm."""
+        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001, max_grad_norm=0.5)
+        assert trainer.max_grad_norm == 0.5
+
+    def test_training_with_gradient_clipping(self):
+        """Training with gradient clipping should converge normally."""
+        fault_cases, load_cases = generate_combined_dataset(
+            n_fault=10, n_load=10, seed=42,
+        )
+        all_cases = fault_cases + load_cases
+        labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
+
+        extractor = FeatureExtractor()
+        X = extractor.extract_batch(all_cases).astype(np.float32)
+
+        torch.manual_seed(42)
+        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(
+            model, learning_rate=0.001, max_grad_norm=1.0,
+        )
+        history = trainer.train(X, labels, epochs=10, batch_size=8)
+        assert history["train_loss"][0] > history["train_loss"][-1]
+
+
+class TestLRScheduling:
+    """Test that the learning rate scheduler is integrated."""
+
+    def test_scheduler_exists(self):
+        """Trainer should have a ReduceLROnPlateau scheduler."""
+        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001)
+        assert hasattr(trainer, "scheduler")
+        assert type(trainer.scheduler).__name__ == "ReduceLROnPlateau"
+
+    def test_training_with_scheduler(self):
+        """Training with validation should trigger scheduler steps."""
+        fault_cases, load_cases = generate_combined_dataset(
+            n_fault=10, n_load=10, seed=42,
+        )
+        all_cases = fault_cases + load_cases
+        labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
+
+        extractor = FeatureExtractor()
+        X = extractor.extract_batch(all_cases).astype(np.float32)
+
+        from sklearn.model_selection import train_test_split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, labels, test_size=0.3, random_state=42, stratify=labels,
+        )
+
+        torch.manual_seed(42)
+        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001)
+        history = trainer.train(
+            X_train, y_train, X_val=X_val, y_val=y_val,
+            epochs=10, batch_size=8,
+        )
+        assert "val_loss" in history
+        assert len(history["val_loss"]) > 0

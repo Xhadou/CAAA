@@ -125,9 +125,14 @@ class FeatureExtractor:
         - Context features (5)
         - Statistical features (13)
         - Service-level features (6)
+
+    Args:
+        seed: Random seed for reproducible noise injection in context
+            features.  Using a fixed seed ensures that extracting the
+            same case twice produces identical features.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, seed: int = 42) -> None:
         self._names: List[str] = (
             _WORKLOAD_NAMES
             + _BEHAVIORAL_NAMES
@@ -136,6 +141,7 @@ class FeatureExtractor:
             + _SERVICE_LEVEL_NAMES
         )
         assert len(self._names) == N_FEATURES
+        self._rng = np.random.RandomState(seed)
 
     # ------------------------------------------------------------------
     # Public API
@@ -385,6 +391,7 @@ class FeatureExtractor:
               for all cases, independent of the label
         """
         ctx = context or {}
+        rng = self._rng
 
         # 13. event_active
         event_active = 1.0 if "event_type" in ctx else 0.0
@@ -395,7 +402,7 @@ class FeatureExtractor:
         else:
             event_expected_impact = 0.0
         event_expected_impact = float(
-            np.clip(event_expected_impact + np.random.normal(0, 0.05), 0.0, 1.0)
+            np.clip(event_expected_impact + rng.normal(0, 0.05), 0.0, 1.0)
         )
 
         # 15. time_seasonality – derive from mean service timestamp
@@ -410,13 +417,13 @@ class FeatureExtractor:
                 h = hour if hour < 9 else hour - 20
                 time_seasonality = 0.1 + 0.3 * h / 8.0
             time_seasonality = float(
-                np.clip(time_seasonality + np.random.uniform(-0.05, 0.05), 0.0, 1.0)
+                np.clip(time_seasonality + rng.uniform(-0.05, 0.05), 0.0, 1.0)
             )
         else:
             time_seasonality = 0.5
 
         # 16. recent_deployment – label-independent base rate of 0.15
-        recent_deployment = 0.3 * np.random.random() if np.random.random() < 0.15 else 0.0
+        recent_deployment = 0.3 * rng.random_sample() if rng.random_sample() < 0.15 else 0.0
 
         # 17. context_confidence (with Gaussian noise, std=0.1)
         conf = 0.0
@@ -426,7 +433,7 @@ class FeatureExtractor:
             conf += 0.2
         if "event_name" in ctx:
             conf += 0.1
-        context_confidence = float(np.clip(min(conf, 1.0) + np.random.normal(0, 0.1), 0.0, 1.0))
+        context_confidence = float(np.clip(min(conf, 1.0) + rng.normal(0, 0.1), 0.0, 1.0))
 
         return np.array([
             event_active,

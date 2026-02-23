@@ -144,9 +144,15 @@ def main():
         X, labels, test_size=0.2, random_state=args.seed, stratify=labels,
     )
 
+    # Further split training data for calibration (avoids data leakage)
+    X_train, X_cal, y_train, y_cal = train_test_split(
+        X_train, y_train, test_size=0.125, random_state=args.seed, stratify=y_train,
+    )
+
     # Scale features (fit on train only) for neural models
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
+    X_cal = scaler.transform(X_cal)
     X_test = scaler.transform(X_test)
 
     # Train CAAA model
@@ -154,13 +160,14 @@ def main():
     model = CAAAModel(input_dim=36)
     trainer = CAAATrainer(model, learning_rate=args.lr, device="cpu")
     trainer.train(
-        X_train, y_train, X_val=X_test, y_val=y_test,
+        X_train, y_train, X_val=X_cal, y_val=y_cal,
         epochs=args.epochs, batch_size=args.batch_size,
         early_stopping_patience=10,
     )
 
-    # Post-hoc temperature calibration on validation set
-    trainer.calibrate_temperature(X_test, y_test)
+    # Post-hoc temperature calibration on held-out calibration set
+    # (NOT the test set, to avoid data leakage)
+    trainer.calibrate_temperature(X_cal, y_cal)
 
     # Evaluate CAAA
     caaa_pred = trainer.predict(X_test)

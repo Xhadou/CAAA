@@ -246,12 +246,19 @@ def run_pipeline(
         X, labels, test_size=0.2, random_state=seed, stratify=labels,
     )
 
+    # Further split training data to get a calibration set for temperature
+    # scaling (avoids data leakage from calibrating on the test set).
+    X_train, X_cal, y_train, y_cal = train_test_split(
+        X_train, y_train, test_size=0.125, random_state=seed, stratify=y_train,
+    )
+
     # Step 3b: Scale AFTER split (fit on train only) for neural models
     scaler = None
     if model_type in ("caaa", "mlp"):
         print("  Applying StandardScaler (fit on train split only)...")
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X_train)
+        X_cal = scaler.transform(X_cal)
         X_test = scaler.transform(X_test)
 
     # ------------------------------------------------------------------
@@ -262,11 +269,12 @@ def run_pipeline(
         model = CAAAModel(input_dim=X_train.shape[1])
         trainer = CAAATrainer(model, learning_rate=learning_rate, device="cpu")
         trainer.train(
-            X_train, y_train, X_val=X_test, y_val=y_test,
+            X_train, y_train, X_val=X_cal, y_val=y_cal,
             epochs=epochs, batch_size=batch_size, early_stopping_patience=10,
         )
-        # Post-hoc temperature calibration on validation set
-        trainer.calibrate_temperature(X_test, y_test)
+        # Post-hoc temperature calibration on held-out calibration set
+        # (NOT the test set, to avoid data leakage)
+        trainer.calibrate_temperature(X_cal, y_cal)
         y_pred = trainer.predict(X_test)
     elif model_type == "xgboost":
         bl = XGBoostBaseline(random_state=seed)

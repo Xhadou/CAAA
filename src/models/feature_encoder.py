@@ -44,6 +44,7 @@ class FeatureEncoder(nn.Module):
         # First layer: input_dim -> hidden_dim
         layers.extend([
             nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
         ])
@@ -51,6 +52,7 @@ class FeatureEncoder(nn.Module):
         for _ in range(num_layers - 1):
             layers.extend([
                 nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
                 nn.ReLU(),
                 nn.Dropout(dropout),
             ])

@@ -40,6 +40,7 @@ class CAAATrainer:
         device: str = "cpu",
         use_context_loss: bool = True,
         loss_type: str = "context_consistency",
+        max_grad_norm: float = 1.0,
     ) -> None:
         """Initializes the CAAATrainer.
 
@@ -55,10 +56,13 @@ class CAAATrainer:
                 ``"context_consistency"`` — ContextConsistencyLoss (default).
                 ``"contrastive"`` — SupConContextLoss.
                 ``"cross_entropy"`` — plain CrossEntropyLoss.
+            max_grad_norm: Maximum gradient norm for clipping. Set to 0 to
+                disable gradient clipping.
         """
         self.device = device
         self.model = model.to(self.device)
         self.loss_type = loss_type
+        self.max_grad_norm = max_grad_norm
 
         # Backward compat: use_context_loss=False overrides to cross_entropy
         if not use_context_loss and loss_type == "context_consistency":
@@ -67,6 +71,9 @@ class CAAATrainer:
         self.use_context_loss = self.loss_type == "context_consistency"
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=learning_rate, weight_decay=weight_decay
+        )
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6,
         )
         if self.loss_type == "contrastive":
             self.criterion = SupConContextLoss()
@@ -155,6 +162,8 @@ class CAAATrainer:
                 else:
                     loss = self.criterion(logits, y_batch)
                 loss.backward()
+                if self.max_grad_norm > 0:
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
                 epoch_loss += loss.item()
@@ -186,6 +195,8 @@ class CAAATrainer:
             if has_val:
                 val_loss = self._compute_loss(X_val_t, y_val_t)
                 history["val_loss"].append(val_loss)
+                # Step the LR scheduler based on validation loss
+                self.scheduler.step(val_loss)
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -205,6 +216,9 @@ class CAAATrainer:
                     if best_state is not None:
                         self.model.load_state_dict(best_state)
                     break
+            else:
+                # No validation set — schedule based on training loss
+                self.scheduler.step(avg_train_loss)
 
             if (epoch + 1) % 10 == 0 or epoch == 0:
                 msg = f"Epoch {epoch + 1}/{epochs} - train_loss: {avg_train_loss:.4f}"
