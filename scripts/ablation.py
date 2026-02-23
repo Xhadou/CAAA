@@ -554,7 +554,12 @@ def main():
         )
         print(f"  ECE (uncalibrated): {ece_uncal:.4f}")
 
-        # After temperature scaling
+        # NOTE: Temperature is calibrated on the test set (X_test, y_test) below.
+        # This is intentionally done only for calibration visualization/diagnostic
+        # purposes (e.g., reliability diagrams and ECE before/after) and MUST NOT
+        # be used as a proper held-out evaluation metric. For reporting final
+        # performance, temperature scaling should be calibrated on a separate
+        # validation split and then applied to the test set.
         T = cal_trainer.calibrate_temperature(X_test, y_test)
         proba_cal = cal_trainer.predict_proba(X_test)
         ece_cal, _, _, _ = compute_expected_calibration_error(y_test, proba_cal)

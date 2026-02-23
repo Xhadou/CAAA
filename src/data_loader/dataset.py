@@ -467,7 +467,7 @@ def generate_hard_dataset(
                 # Inject attenuated error/latency increases
                 df.loc[fault_sl, "error_rate"] = np.clip(
                     df.loc[fault_sl, "error_rate"].values
-                    + np.random.uniform(0.05, 0.25) * attenuation,
+                    + np.random.uniform(0.15, 0.25) * attenuation,
                     0, 1,
                 )
                 df.loc[fault_sl, "latency"] = np.clip(
