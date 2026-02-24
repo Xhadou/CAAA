@@ -235,19 +235,24 @@ class FeatureExtractor:
             corrs.append(_safe_pearsonr(cpu, req))
         cpu_request_correlation = float(np.mean(corrs))
 
-        # 3. cross_service_sync
+        # 3. cross_service_sync — mean pairwise CPU correlation
         if n < 2:
             cross_service_sync = 0.0
         else:
             cpu_series = [svc.metrics["cpu_usage"].values for svc in services]
-            pair_corrs = []
-            for i in range(n):
-                for j in range(i + 1, n):
-                    min_len = min(len(cpu_series[i]), len(cpu_series[j]))
-                    pair_corrs.append(
-                        _safe_pearsonr(cpu_series[i][:min_len], cpu_series[j][:min_len])
-                    )
-            cross_service_sync = float(np.mean(pair_corrs)) if pair_corrs else 0.0
+            # Pad/truncate to uniform length for vectorized correlation
+            min_len = min(len(s) for s in cpu_series)
+            if min_len < 2:
+                cross_service_sync = 0.0
+            else:
+                cpu_matrix = np.array([s[:min_len] for s in cpu_series])
+                # np.corrcoef returns the full correlation matrix
+                with np.errstate(invalid="ignore"):
+                    corr_matrix = np.corrcoef(cpu_matrix)
+                corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
+                # Extract upper triangle (excluding diagonal)
+                upper = corr_matrix[np.triu_indices(n, k=1)]
+                cross_service_sync = float(np.mean(upper)) if len(upper) > 0 else 0.0
 
         # 4. error_rate_delta
         deltas = []
