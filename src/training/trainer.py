@@ -149,17 +149,19 @@ class CAAATrainer:
                 y_batch = y_train_t[batch_idx]
 
                 self.optimizer.zero_grad()
-                logits = self.model(X_batch)
                 if self.loss_type == "contrastive":
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
                     embeddings = self.model.get_embeddings(X_batch)
+                    logits = self.model.classifier(embeddings)
                     loss, components = self.criterion(
                         embeddings, logits, y_batch, context,
                     )
                 elif self.use_context_loss:
+                    logits = self.model(X_batch)
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
                     loss, components = self.criterion(logits, y_batch, context)
                 else:
+                    logits = self.model(X_batch)
                     loss = self.criterion(logits, y_batch)
                 loss.backward()
                 if self.max_grad_norm > 0:
@@ -243,12 +245,21 @@ class CAAATrainer:
 
         self.model.eval()
         with torch.no_grad():
-            logits = self.model(X_t)
-            if self.use_context_loss:
+            if self.loss_type == "contrastive":
+                context = X_t[:, _CONTEXT_START:_CONTEXT_END]
+                embeddings = self.model.get_embeddings(X_t)
+                logits = self.model.classifier(embeddings)
+                loss_tensor, _ = self.criterion(
+                    embeddings, logits, y_t, context,
+                )
+                loss = loss_tensor.item()
+            elif self.use_context_loss:
+                logits = self.model(X_t)
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 loss_tensor, _ = self.criterion(logits, y_t, context)
                 loss = loss_tensor.item()
             else:
+                logits = self.model(X_t)
                 loss = self.criterion(logits, y_t).item()
             preds = torch.argmax(logits, dim=-1)
             accuracy = (preds == y_t).float().mean().item()
@@ -312,7 +323,7 @@ class CAAATrainer:
             return loss
 
         optimizer.step(eval_fn)
-        self.temperature = temperature.item()
+        self.temperature = max(temperature.item(), 0.01)
         logger.info("Calibrated temperature: %.4f", self.temperature)
         return self.temperature
 
@@ -523,14 +534,16 @@ class CAAATrainer:
         """
         self.model.eval()
         with torch.no_grad():
-            logits = self.model(X_t)
             if self.loss_type == "contrastive":
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 embeddings = self.model.get_embeddings(X_t)
+                logits = self.model.classifier(embeddings)
                 loss, _ = self.criterion(embeddings, logits, y_t, context)
             elif self.use_context_loss:
+                logits = self.model(X_t)
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 loss, _ = self.criterion(logits, y_t, context)
             else:
+                logits = self.model(X_t)
                 loss = self.criterion(logits, y_t)
         return loss.item()

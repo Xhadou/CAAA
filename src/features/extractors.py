@@ -9,6 +9,7 @@ via the ``ruptures`` library, inspired by BARO (FSE 2024) which showed that
 Bayesian change point detection before RCA improves results by 58-189%.
 """
 
+from datetime import datetime as _datetime, timezone as _timezone
 import functools
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -201,7 +202,10 @@ class FeatureExtractor:
         Returns:
             A 2-D numpy array of shape ``(len(cases), 36)``.
         """
-        return np.vstack([self.extract(c) for c in cases])
+        out = np.empty((len(cases), N_FEATURES), dtype=np.float64)
+        for i, c in enumerate(cases):
+            out[i] = self.extract(c)
+        return out
 
     def feature_names(self) -> List[str]:
         """Return ordered list of 36 feature names."""
@@ -216,10 +220,15 @@ class FeatureExtractor:
         if n == 0:
             return np.zeros(6)
 
+        # Pre-extract arrays once per service to avoid repeated .values calls
+        cpu_arrays = [svc.metrics["cpu_usage"].values for svc in services]
+        req_arrays = [svc.metrics["request_rate"].values for svc in services]
+        err_arrays = [svc.metrics["error_rate"].values for svc in services]
+        lat_arrays = [svc.metrics["latency"].values for svc in services]
+
         # 1. global_load_ratio
         increased = 0
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             mid = len(cpu) // 2
             if mid == 0:
                 continue
@@ -229,9 +238,7 @@ class FeatureExtractor:
 
         # 2. cpu_request_correlation
         corrs = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
-            req = svc.metrics["request_rate"].values
+        for cpu, req in zip(cpu_arrays, req_arrays):
             corrs.append(_safe_pearsonr(cpu, req))
         cpu_request_correlation = float(np.mean(corrs))
 
@@ -239,13 +246,12 @@ class FeatureExtractor:
         if n < 2:
             cross_service_sync = 0.0
         else:
-            cpu_series = [svc.metrics["cpu_usage"].values for svc in services]
             # Pad/truncate to uniform length for vectorized correlation
-            min_len = min(len(s) for s in cpu_series)
+            min_len = min(len(s) for s in cpu_arrays)
             if min_len < 2:
                 cross_service_sync = 0.0
             else:
-                cpu_matrix = np.array([s[:min_len] for s in cpu_series])
+                cpu_matrix = np.array([s[:min_len] for s in cpu_arrays])
                 # Filter out constant series (zero std) which produce NaN
                 # correlations — treat them as uncorrelated (0.0).
                 stds = np.std(cpu_matrix, axis=1)
@@ -261,8 +267,7 @@ class FeatureExtractor:
 
         # 4. error_rate_delta
         deltas = []
-        for svc in services:
-            err = svc.metrics["error_rate"].values
+        for err in err_arrays:
             mid = len(err) // 2
             if mid == 0:
                 continue
@@ -271,16 +276,13 @@ class FeatureExtractor:
 
         # 5. latency_cpu_correlation
         lat_corrs = []
-        for svc in services:
-            lat = svc.metrics["latency"].values
-            cpu = svc.metrics["cpu_usage"].values
+        for lat, cpu in zip(lat_arrays, cpu_arrays):
             lat_corrs.append(_safe_pearsonr(lat, cpu))
         latency_cpu_correlation = float(np.mean(lat_corrs))
 
         # 6. change_point_magnitude (replaces memory_trend_uniformity)
         magnitudes = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             _, mag, _ = _detect_change_point_cached(tuple(cpu))
             magnitudes.append(mag)
         change_point_magnitude = float(np.mean(magnitudes))
@@ -303,18 +305,19 @@ class FeatureExtractor:
         if n == 0:
             return np.zeros(6)
 
+        # Pre-extract CPU arrays once per service
+        cpu_arrays = [svc.metrics["cpu_usage"].values for svc in services]
+
         # 7. onset_gradient (change-point-based abruptness via PELT)
         abruptness_values = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             _, _, abruptness = _detect_change_point_cached(tuple(cpu))
             abruptness_values.append(abruptness)
         onset_gradient = float(np.mean(abruptness_values))
 
         # 8. peak_duration
         durations = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             seq_len = len(cpu)
             if seq_len == 0:
                 durations.append(0.0)
@@ -330,8 +333,7 @@ class FeatureExtractor:
 
         # 9. cascade_score
         onset_times: List[float] = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             std = np.std(cpu)
             if std == 0.0 or len(cpu) < 2:
                 continue
@@ -342,13 +344,12 @@ class FeatureExtractor:
         if len(onset_times) < 2:
             cascade_score = 0.0
         else:
-            seq_len = max(len(svc.metrics.index) for svc in services)
+            seq_len = max(len(c) for c in cpu_arrays)
             cascade_score = float(np.std(onset_times) / (seq_len + 1e-10))
 
         # 10. recovery_indicator
         recoveries = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             if len(cpu) < 4:
                 recoveries.append(0.0)
                 continue
@@ -363,8 +364,7 @@ class FeatureExtractor:
 
         # 11. affected_service_ratio
         affected = 0
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             std = np.std(cpu)
             if std == 0.0:
                 continue
@@ -375,8 +375,7 @@ class FeatureExtractor:
 
         # 12. variance_change_ratio
         var_ratios = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
+        for cpu in cpu_arrays:
             mid = len(cpu) // 2
             if mid == 0:
                 var_ratios.append(0.0)
@@ -460,7 +459,9 @@ class FeatureExtractor:
             if mean_ts < _SYNTHETIC_TS_THRESHOLD:
                 time_seasonality = 0.5
             else:
-                hour = mean_ts % 24
+                hour = _datetime.fromtimestamp(
+                    mean_ts, tz=_timezone.utc
+                ).hour
                 if 9 <= hour <= 20:
                     time_seasonality = 0.7 + 0.3 * (hour - 9) / 11.0
                 else:
@@ -504,12 +505,13 @@ class FeatureExtractor:
         if not services:
             return np.zeros(13)
 
-        all_frames = pd.concat(
-            [svc.metrics[_STAT_METRIC_COLS] for svc in services], ignore_index=True
-        )
+        # Use numpy directly instead of pd.concat() to avoid DataFrame
+        # allocation overhead per case.
+        arrays = [svc.metrics[_STAT_METRIC_COLS].values for svc in services]
+        combined = np.concatenate(arrays, axis=0)  # (total_rows, n_cols)
 
-        means = all_frames.mean().values.astype(float)  # 6
-        stds = all_frames.std().values.astype(float)  # 6
+        means = np.mean(combined, axis=0)   # one mean per metric column
+        stds = np.std(combined, axis=0, ddof=1)  # one std per metric column; ddof=1 matches pandas
         stds = np.nan_to_num(stds, nan=0.0)
 
         # max error_rate across all services

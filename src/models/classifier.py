@@ -178,16 +178,13 @@ class AnomalyClassifier:
                 for the PyTorch-based equivalent using integer labels.
         """
         probas = self.predict_proba(X)
-        predictions: List[str] = []
-        confidences: List[float] = []
-
-        for _, row in probas.iterrows():
-            max_prob = float(row.max())
-            max_class = str(row.idxmax())
-            predictions.append(max_class if max_prob >= confidence_threshold else "UNKNOWN")
-            confidences.append(max_prob)
-
-        return np.array(predictions), np.array(confidences)
+        proba_values = probas.values
+        confidences = proba_values.max(axis=1)
+        max_class_indices = proba_values.argmax(axis=1)
+        class_names = probas.columns.to_numpy()
+        predictions = class_names[max_class_indices]
+        predictions = np.where(confidences >= confidence_threshold, predictions, "UNKNOWN")
+        return predictions, confidences
 
     # ------------------------------------------------------------------
     # Evaluation

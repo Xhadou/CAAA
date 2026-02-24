@@ -172,7 +172,7 @@ class AnomalyDetector:
         ).to(self.device)
 
         dataset = TimeSeriesDataset(train_data, self.seq_length)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         criterion = nn.MSELoss()
 
@@ -205,6 +205,8 @@ class AnomalyDetector:
     def compute_reconstruction_errors(self, data: np.ndarray) -> np.ndarray:
         """Compute per-window reconstruction error."""
         assert self.model is not None
+        if len(data) <= self.seq_length:
+            return np.array([], dtype=np.float64)
         self.model.eval()
         errors: List[float] = []
         with torch.no_grad():
@@ -244,7 +246,7 @@ class AnomalyDetector:
         }, path)
 
     def load(self, path: str, n_features: int) -> None:
-        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         cfg = checkpoint["config"]
         self.model = LSTMAutoencoder(
             n_features=n_features,
