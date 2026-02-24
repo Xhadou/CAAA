@@ -508,10 +508,10 @@ class FeatureExtractor:
         # Use numpy directly instead of pd.concat() to avoid DataFrame
         # allocation overhead per case.
         arrays = [svc.metrics[_STAT_METRIC_COLS].values for svc in services]
-        combined = np.concatenate(arrays, axis=0)  # (total_rows, 6)
+        combined = np.concatenate(arrays, axis=0)  # (total_rows, n_cols)
 
-        means = np.mean(combined, axis=0)  # 6
-        stds = np.std(combined, axis=0, ddof=1)  # 6, ddof=1 matches pandas default
+        means = np.mean(combined, axis=0)   # one mean per metric column
+        stds = np.std(combined, axis=0, ddof=1)  # one std per metric column; ddof=1 matches pandas
         stds = np.nan_to_num(stds, nan=0.0)
 
         # max error_rate across all services

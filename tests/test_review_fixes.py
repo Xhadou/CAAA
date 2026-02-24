@@ -452,11 +452,13 @@ class TestStatisticalFeaturesNumpy:
         assert "np.concatenate" in source
 
     def test_statistical_features_all_finite(self):
+        from src.features.feature_schema import STATISTICAL_RANGE
         fault_cases, load_cases = generate_combined_dataset(
             n_fault=5, n_load=5, seed=42, include_hard=False,
         )
         ext = FeatureExtractor(seed=42)
+        start, end = STATISTICAL_RANGE
         for case in fault_cases + load_cases:
             feats = ext.extract(case)
-            stat_feats = feats[17:30]  # statistical range
+            stat_feats = feats[start:end]
             assert np.all(np.isfinite(stat_feats))
