@@ -41,6 +41,7 @@ class BaselineClassifier:
             n_estimators=n_estimators,
             max_depth=max_depth,
             random_state=random_state,
+            class_weight="balanced",
         )
         logger.info(
             "BaselineClassifier initialized: n_estimators=%d, max_depth=%d",

@@ -88,6 +88,9 @@ def main():
         if args.systems == ["online-boutique"]:
             args.systems = data_cfg.get("systems", args.systems)
 
+    # Set both legacy and modern NumPy seeds: data generators use
+    # np.random.default_rng() (modern API), while some scikit-learn
+    # internals still draw from the legacy global state.
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 

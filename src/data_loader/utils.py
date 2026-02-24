@@ -53,9 +53,17 @@ def generate_base_metrics(
     net_in = np.clip(net_in, 0, None)
     net_out = np.clip(net_out, 0, None)
 
+    # Use epoch-based timestamps so that `time_seasonality` in the feature
+    # extractor activates on synthetic data.  A base epoch (~Nov 2023) plus
+    # a random intra-day offset gives realistic hour-of-day variation;
+    # observations are spaced 60 seconds apart to mimic 1-minute scrapes.
+    _BASE_EPOCH = 1_700_000_000  # 2023-11-14 ~22:13 UTC
+    start_offset = int(rng.integers(0, 86_400))  # random offset within one day
+    timestamps = _BASE_EPOCH + start_offset + np.arange(n) * 60
+
     return pd.DataFrame(
         {
-            "timestamp": np.arange(n),
+            "timestamp": timestamps,
             "cpu_usage": cpu,
             "memory_usage": mem,
             "request_rate": req,
