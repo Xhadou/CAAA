@@ -268,8 +268,9 @@ def run_pipeline(
     # ------------------------------------------------------------------
     print(f"\n[3/5] Training {model_type} model...")
     if model_type == "caaa":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         model = CAAAModel(input_dim=X_train.shape[1])
-        trainer = CAAATrainer(model, learning_rate=learning_rate, device="cpu")
+        trainer = CAAATrainer(model, learning_rate=learning_rate, device=device)
         trainer.train(
             X_train, y_train, X_val=X_cal, y_val=y_cal,
             epochs=epochs, batch_size=batch_size, early_stopping_patience=10,

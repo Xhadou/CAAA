@@ -9,6 +9,7 @@ via the ``ruptures`` library, inspired by BARO (FSE 2024) which showed that
 Bayesian change point detection before RCA improves results by 58-189%.
 """
 
+import datetime
 import functools
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -201,7 +202,10 @@ class FeatureExtractor:
         Returns:
             A 2-D numpy array of shape ``(len(cases), 36)``.
         """
-        return np.vstack([self.extract(c) for c in cases])
+        out = np.empty((len(cases), N_FEATURES), dtype=np.float64)
+        for i, c in enumerate(cases):
+            out[i] = self.extract(c)
+        return out
 
     def feature_names(self) -> List[str]:
         """Return ordered list of 36 feature names."""
@@ -460,7 +464,9 @@ class FeatureExtractor:
             if mean_ts < _SYNTHETIC_TS_THRESHOLD:
                 time_seasonality = 0.5
             else:
-                hour = mean_ts % 24
+                hour = datetime.datetime.fromtimestamp(
+                    mean_ts, tz=datetime.timezone.utc
+                ).hour
                 if 9 <= hour <= 20:
                     time_seasonality = 0.7 + 0.3 * (hour - 9) / 11.0
                 else:

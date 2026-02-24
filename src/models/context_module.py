@@ -54,8 +54,10 @@ class ContextIntegrationModule(nn.Module):
         # 1. Context encoder: context_dim -> hidden_dim -> hidden_dim
         self.context_encoder = nn.Sequential(
             nn.Linear(context_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
         )
 
