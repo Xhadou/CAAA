@@ -20,6 +20,7 @@ class RCAEvalLoader:
     """
 
     FAULT_TYPES = ["cpu", "mem", "disk", "delay", "loss", "socket"]
+    KNOWN_SYSTEMS = ["online-boutique", "sock-shop", "train-ticket"]
 
     def __init__(self, data_dir: str = "data/raw") -> None:
         self.data_dir = Path(data_dir)
@@ -34,10 +35,21 @@ class RCAEvalLoader:
 
         Format: ``{system}_{service}_{fault}_{instance}``
         Example: ``online-boutique_frontend_cpu_1``
+
+        Raises:
+            ValueError: If the parsed system name is not one of the known
+                systems (``online-boutique``, ``sock-shop``, ``train-ticket``).
         """
         parts = case_name.split("_")
+        system = parts[0]
+        known = RCAEvalLoader.KNOWN_SYSTEMS
+        if system not in known:
+            raise ValueError(
+                f"Unrecognized system name '{system}' in case '{case_name}'. "
+                f"Expected one of: {known}"
+            )
         return {
-            "system": parts[0],
+            "system": system,
             "service": parts[1] if len(parts) > 1 else "unknown",
             "fault_type": parts[2] if len(parts) > 2 else "unknown",
             "instance": int(parts[3]) if len(parts) > 3 else 0,

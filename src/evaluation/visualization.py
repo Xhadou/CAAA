@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from src.features.feature_schema import FEATURE_GROUPS as _FEATURE_GROUPS
+from src.features.feature_schema import FEATURE_GROUPS as _FEATURE_GROUPS, FEATURE_GROUP_COLORS as _FEATURE_GROUP_COLORS
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +30,6 @@ _PALETTE = {
     "incorrect": "#e74c3c",
 }
 
-_FEATURE_GROUP_COLORS = {
-    "workload": "#3498db",
-    "behavioral": "#e74c3c",
-    "context": "#2ecc71",
-    "statistical": "#f39c12",
-    "service-level": "#9b59b6",
-}
 
 
 

@@ -10,7 +10,6 @@ Bayesian change point detection before RCA improves results by 58-189%.
 """
 
 from datetime import datetime as _datetime, timezone as _timezone
-import functools
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -60,14 +59,6 @@ def _linear_slope(arr: np.ndarray) -> float:
     with np.errstate(invalid="ignore"):
         coeffs = np.polyfit(x, arr, 1)
     return float(coeffs[0]) if np.isfinite(coeffs[0]) else 0.0
-
-
-@functools.lru_cache(maxsize=4096)
-def _detect_change_point_cached(
-    series_tuple: Tuple[float, ...], penalty: float = 10,
-) -> Tuple[int, float, float]:
-    """Wrapper around :func:`_detect_change_point`."""
-    return _detect_change_point(np.array(series_tuple), penalty)
 
 
 def _detect_change_point(
@@ -283,7 +274,7 @@ class FeatureExtractor:
         # 6. change_point_magnitude (replaces memory_trend_uniformity)
         magnitudes = []
         for cpu in cpu_arrays:
-            _, mag, _ = _detect_change_point_cached(tuple(cpu))
+            _, mag, _ = _detect_change_point(cpu)
             magnitudes.append(mag)
         change_point_magnitude = float(np.mean(magnitudes))
 
@@ -311,7 +302,7 @@ class FeatureExtractor:
         # 7. onset_gradient (change-point-based abruptness via PELT)
         abruptness_values = []
         for cpu in cpu_arrays:
-            _, _, abruptness = _detect_change_point_cached(tuple(cpu))
+            _, _, abruptness = _detect_change_point(cpu)
             abruptness_values.append(abruptness)
         onset_gradient = float(np.mean(abruptness_values))
 

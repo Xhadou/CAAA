@@ -45,6 +45,9 @@ def main():
         if args.epochs == 30:
             args.epochs = training_cfg.get("epochs", args.epochs)
 
+    # Set both legacy and modern NumPy seeds: data generators use
+    # np.random.default_rng() (modern API), while some scikit-learn
+    # internals still draw from the legacy global state.
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
