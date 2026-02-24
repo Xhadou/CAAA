@@ -28,16 +28,28 @@ class RCAEvalLoader:
     # Helpers
     # ------------------------------------------------------------------
 
+    KNOWN_SYSTEMS = {"online-boutique", "sock-shop", "train-ticket"}
+
     @staticmethod
     def parse_case_name(case_name: str) -> Dict:
         """Parse case directory name.
 
         Format: ``{system}_{service}_{fault}_{instance}``
         Example: ``online-boutique_frontend_cpu_1``
+
+        Raises:
+            ValueError: If the parsed system name is not one of the known
+                RCAEval systems.
         """
         parts = case_name.split("_")
+        system = parts[0]
+        if system not in RCAEvalLoader.KNOWN_SYSTEMS:
+            raise ValueError(
+                f"Unknown system '{system}' parsed from case '{case_name}'. "
+                f"Expected one of {sorted(RCAEvalLoader.KNOWN_SYSTEMS)}"
+            )
         return {
-            "system": parts[0],
+            "system": system,
             "service": parts[1] if len(parts) > 1 else "unknown",
             "fault_type": parts[2] if len(parts) > 2 else "unknown",
             "instance": int(parts[3]) if len(parts) > 3 else 0,

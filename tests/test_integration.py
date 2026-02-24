@@ -337,7 +337,7 @@ class TestContrastiveTraining:
         trainer = CAAATrainer(
             model, learning_rate=0.001, loss_type="contrastive",
         )
-        history = trainer.train(X, labels, epochs=15, batch_size=16)
+        history = trainer.train(X, labels, epochs=30, batch_size=16)
 
         assert "train_loss" in history
         assert "contrastive_loss" in history

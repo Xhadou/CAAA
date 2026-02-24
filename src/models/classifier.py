@@ -229,6 +229,7 @@ class AnomalyClassifier:
                 "label_encoder": self.label_encoder,
                 "feature_names": self.feature_names,
                 "model_type": self.model_type,
+                "model_kwargs": self.model_kwargs,
             },
             path,
         )
@@ -242,6 +243,7 @@ class AnomalyClassifier:
         obj.model = data["model"]
         obj.label_encoder = data["label_encoder"]
         obj.feature_names = data["feature_names"]
+        obj.model_kwargs = data.get("model_kwargs", {})
         obj.is_fitted = True
         return obj
 
