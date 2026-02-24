@@ -438,13 +438,16 @@ class FeatureExtractor:
         # a constant ~0.306 for all cases.  We set 0.5 (neutral) for
         # synthetic data; this feature only activates on real-world data
         # with epoch-based timestamps.
+        # Epoch timestamps for dates after 2001 are > 1 billion; synthetic
+        # sequential integers are typically < 1000.
+        _SYNTHETIC_TS_THRESHOLD = 1_000_000
         if services:
             mean_ts = np.mean(
                 [svc.metrics["timestamp"].mean() for svc in services]
             )
-            # Detect synthetic timestamps: if mean_ts < 1_000_000, the
-            # timestamps are likely sequential integers, not epoch seconds.
-            if mean_ts < 1_000_000:
+            # Detect synthetic timestamps: if mean_ts is below the threshold,
+            # the timestamps are sequential integers, not epoch seconds.
+            if mean_ts < _SYNTHETIC_TS_THRESHOLD:
                 time_seasonality = 0.5
             else:
                 hour = mean_ts % 24

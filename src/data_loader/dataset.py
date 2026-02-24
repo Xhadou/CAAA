@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 # Systems matching RCAEval benchmark.
 RESEARCH_SYSTEMS: List[str] = ["online-boutique", "sock-shop", "train-ticket"]
 
+# Multiplier used to derive per-case seeds from the base seed and case index.
+# Must be large enough to avoid overlap between different generation phases
+# (e.g., seed * _CASE_SEED_MULT + i vs (seed+1) * _CASE_SEED_MULT + j).
+_CASE_SEED_MULT: int = 10000
+
 
 def generate_combined_dataset(
     n_fault: int = 50,
@@ -50,7 +55,7 @@ def generate_combined_dataset(
     logger.info("Generating %d fault cases", n_fault)
     for i in range(n_fault):
         system = systems[i % len(systems)]
-        case_seed = seed * 10000 + i
+        case_seed = seed * _CASE_SEED_MULT + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
             system=system, case_seed=case_seed,
         )
@@ -84,7 +89,7 @@ def generate_combined_dataset(
     logger.info("Generating %d expected-load cases", n_load)
     for i in range(n_load):
         system = systems[i % len(systems)]
-        case_seed = (seed + 1) * 10000 + i
+        case_seed = (seed + 1) * _CASE_SEED_MULT + i
         services, context = load_gen.generate_load_spike_metrics(
             system=system, case_seed=case_seed,
         )
@@ -348,8 +353,8 @@ def generate_hard_dataset(
     # --- (a) FAULT_DURING_EVENT: fault injected on top of load spike ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
-        case_seed_load = seed * 10000 + i
-        case_seed_fault = seed * 10000 + 1000 + i
+        case_seed_load = seed * _CASE_SEED_MULT + i
+        case_seed_fault = seed * _CASE_SEED_MULT + 1000 + i
         # Generate a load spike first
         services, context = load_gen.generate_load_spike_metrics(
             system=system, case_seed=case_seed_load,
@@ -379,7 +384,7 @@ def generate_hard_dataset(
     # --- (b) CAPACITY_EXCEEDED_LOAD: extreme load causes errors ---
     for i in range(n_load_per_type):
         system = systems[i % len(systems)]
-        case_seed_b = seed * 10000 + 2000 + i
+        case_seed_b = seed * _CASE_SEED_MULT + 2000 + i
         high_mult = float(rng.uniform(5.0, 10.0))
         services, context = load_gen.generate_load_spike_metrics(
             system=system, load_multiplier=high_mult, case_seed=case_seed_b,
@@ -413,7 +418,7 @@ def generate_hard_dataset(
     # --- (c) GRADUAL_FAULT: slow ramp-up over full window ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
-        case_seed_c = seed * 10000 + 3000 + i
+        case_seed_c = seed * _CASE_SEED_MULT + 3000 + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
             system=system, case_seed=case_seed_c,
         )
@@ -453,7 +458,7 @@ def generate_hard_dataset(
     # --- (e) CORRELATED_FAULT: fault propagates to neighbor services ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
-        case_seed_e = seed * 10000 + 4000 + i
+        case_seed_e = seed * _CASE_SEED_MULT + 4000 + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
             system=system, case_seed=case_seed_e,
         )
@@ -507,7 +512,7 @@ def generate_hard_dataset(
     # --- (d) PARTIAL_LOAD: spike affects only 3-4 services ---
     for i in range(n_load_per_type):
         system = systems[i % len(systems)]
-        case_seed_d = seed * 10000 + 5000 + i
+        case_seed_d = seed * _CASE_SEED_MULT + 5000 + i
         services, context = load_gen.generate_load_spike_metrics(
             system=system, case_seed=case_seed_d,
         )
