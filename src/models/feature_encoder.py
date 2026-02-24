@@ -1,7 +1,7 @@
 """Feature encoder module for CAAA model."""
 
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -40,7 +40,7 @@ class FeatureEncoder(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
 
-        layers: list[nn.Module] = []
+        layers: List[nn.Module] = []
         # First layer: input_dim -> hidden_dim
         layers.extend([
             nn.Linear(input_dim, hidden_dim),

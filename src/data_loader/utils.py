@@ -53,9 +53,16 @@ def generate_base_metrics(
     net_in = np.clip(net_in, 0, None)
     net_out = np.clip(net_out, 0, None)
 
+    # Use epoch-based timestamps (base ≈ Nov 2023) with random offsets so
+    # that downstream features like ``time_seasonality`` receive realistic
+    # values instead of the constant 0.5 produced by sequential integers.
+    base_epoch = 1_700_000_000
+    offsets = np.sort(rng.integers(0, 86_400, size=n))  # within a single day
+    timestamps = base_epoch + offsets
+
     return pd.DataFrame(
         {
-            "timestamp": np.arange(n),
+            "timestamp": timestamps,
             "cpu_usage": cpu,
             "memory_usage": mem,
             "request_rate": req,

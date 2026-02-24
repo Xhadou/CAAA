@@ -108,11 +108,11 @@ def run_pipeline(
     if systems is None:
         systems = ["online-boutique"]
 
+    # Seed both the legacy (np.random.seed) and modern (default_rng) APIs.
+    # Data generators use np.random.default_rng(seed); the legacy seed is
+    # set here because some scikit-learn internals still rely on global state.
     np.random.seed(seed)
     torch.manual_seed(seed)
-
-    print("=" * 60)
-    print("CAAA: Context-Aware Anomaly Attribution")
     print("=" * 60)
     print(f"\nConfiguration:")
     print(f"  Fault cases:  {n_fault}")

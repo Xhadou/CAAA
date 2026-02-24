@@ -10,7 +10,6 @@ Bayesian change point detection before RCA improves results by 58-189%.
 """
 
 from datetime import datetime as _datetime, timezone as _timezone
-import functools
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -61,13 +60,6 @@ def _linear_slope(arr: np.ndarray) -> float:
         coeffs = np.polyfit(x, arr, 1)
     return float(coeffs[0]) if np.isfinite(coeffs[0]) else 0.0
 
-
-@functools.lru_cache(maxsize=4096)
-def _detect_change_point_cached(
-    series_tuple: Tuple[float, ...], penalty: float = 10,
-) -> Tuple[int, float, float]:
-    """Wrapper around :func:`_detect_change_point`."""
-    return _detect_change_point(np.array(series_tuple), penalty)
 
 
 def _detect_change_point(
@@ -283,7 +275,7 @@ class FeatureExtractor:
         # 6. change_point_magnitude (replaces memory_trend_uniformity)
         magnitudes = []
         for cpu in cpu_arrays:
-            _, mag, _ = _detect_change_point_cached(tuple(cpu))
+            _, mag, _ = _detect_change_point(cpu)
             magnitudes.append(mag)
         change_point_magnitude = float(np.mean(magnitudes))
 
@@ -311,7 +303,7 @@ class FeatureExtractor:
         # 7. onset_gradient (change-point-based abruptness via PELT)
         abruptness_values = []
         for cpu in cpu_arrays:
-            _, _, abruptness = _detect_change_point_cached(tuple(cpu))
+            _, _, abruptness = _detect_change_point(cpu)
             abruptness_values.append(abruptness)
         onset_gradient = float(np.mean(abruptness_values))
 
@@ -443,12 +435,10 @@ class FeatureExtractor:
         )
 
         # 15. time_seasonality – derive from mean service timestamp
-        # Synthetic timestamps are np.arange(n) (integers 0–59), producing
-        # a constant ~0.306 for all cases.  We set 0.5 (neutral) for
-        # synthetic data; this feature only activates on real-world data
-        # with epoch-based timestamps.
-        # Epoch timestamps for dates after 2001 are > 1 billion; synthetic
-        # sequential integers are typically < 1000.
+        # Epoch timestamps for dates after 2001 are > 1 billion; the
+        # threshold below distinguishes non-epoch sequential integers
+        # (which would still be used by manually constructed test data)
+        # from real/synthetic epoch-based timestamps.
         _SYNTHETIC_TS_THRESHOLD = 1_000_000
         if services:
             mean_ts = np.mean(

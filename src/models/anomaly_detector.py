@@ -5,6 +5,7 @@ based), not *why*.  The attribution (FAULT vs EXPECTED_LOAD) is handled
 by :mod:`src.models.caaa_model` or :mod:`src.models.classifier`.
 """
 
+import logging
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -13,6 +14,8 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
+
+logger = logging.getLogger(__name__)
 
 
 class TimeSeriesDataset(Dataset):
@@ -188,7 +191,7 @@ class AnomalyDetector:
                 optimizer.step()
                 total_loss += loss.item()
             if (epoch + 1) % 10 == 0:
-                print(f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss / max(len(loader), 1):.6f}")
+                logger.info("Epoch %d/%d, Loss: %.6f", epoch + 1, epochs, total_loss / max(len(loader), 1))
 
         # Compute threshold on HELD-OUT calibration data (not training data)
         self._compute_threshold(cal_data)
@@ -200,7 +203,7 @@ class AnomalyDetector:
     def _compute_threshold(self, data: np.ndarray) -> None:
         errors = self.compute_reconstruction_errors(data)
         self.threshold = float(np.percentile(errors, self.threshold_percentile))
-        print(f"Anomaly threshold set to: {self.threshold:.6f}")
+        logger.info("Anomaly threshold set to: %.6f", self.threshold)
 
     def compute_reconstruction_errors(self, data: np.ndarray) -> np.ndarray:
         """Compute per-window reconstruction error."""

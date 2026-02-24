@@ -21,8 +21,8 @@
 ## Step 0.1: Create Project Structure
 
 ```bash
-mkdir -p ceaa-project/{data,src,models,notebooks,configs,outputs,tests}
-cd ceaa-project
+mkdir -p caaa-project/{data,src,models,notebooks,configs,outputs,tests}
+cd caaa-project
 
 # Create subdirectories
 mkdir -p data/{raw,processed,synthetic}
@@ -86,7 +86,7 @@ pip install -r requirements.txt
 
 ```bash
 cat > configs/config.yaml << 'EOF'
-# CEAA Configuration
+# CAAA Configuration
 
 data:
   raw_path: "data/raw"
@@ -2540,7 +2540,7 @@ Create file: `src/main.py`
 
 ```python
 """
-Main CEAA Pipeline.
+Main CAAA Pipeline.
 Complete end-to-end workflow for anomaly attribution.
 """
 import argparse
@@ -2570,7 +2570,7 @@ def run_pipeline(
     output_dir: str = "outputs/results"
 ):
     """
-    Run the complete CEAA pipeline.
+    Run the complete CAAA pipeline.
     
     Args:
         dataset: RCAEval dataset (RE1, RE2, RE3)
@@ -2580,7 +2580,7 @@ def run_pipeline(
         output_dir: Output directory
     """
     print("="*60)
-    print("CEAA: Context-Enriched Anomaly Attribution")
+    print("CAAA: Context-Aware Anomaly Attribution")
     print("="*60)
     print(f"\nConfiguration:")
     print(f"  Dataset: {dataset}/{system}")
@@ -2642,7 +2642,7 @@ def run_pipeline(
     print("\nBaseline (all anomalies = FAULT):")
     print(f"  FP Rate: {baseline_fp_rate:.3f}")
     
-    print(f"\nCEAA Model ({model_type}):")
+    print(f"\nCAAA Model ({model_type}):")
     print(f"  Accuracy: {model_metrics['accuracy']:.3f}")
     print(f"  F1 Score: {model_metrics['f1_weighted']:.3f}")
     print(f"  FP Rate: {model_metrics['fp_rate_FAULT']:.3f}")
@@ -2672,7 +2672,7 @@ def run_pipeline(
     return classifier, model_metrics
 
 def main():
-    parser = argparse.ArgumentParser(description="CEAA: Context-Enriched Anomaly Attribution")
+    parser = argparse.ArgumentParser(description="CAAA: Context-Aware Anomaly Attribution")
     
     parser.add_argument('--dataset', type=str, default='RE1',
                        choices=['RE1', 'RE2', 'RE3'],
@@ -2708,11 +2708,11 @@ Create file: `run_experiment.sh`
 
 ```bash
 #!/bin/bash
-# Quick start script for CEAA experiment
+# Quick start script for CAAA experiment
 
 set -e
 
-echo "CEAA: Context-Enriched Anomaly Attribution"
+echo "CAAA: Context-Aware Anomaly Attribution"
 echo "==========================================="
 
 # Check Python version
@@ -2738,7 +2738,7 @@ if [ ! -d "data/raw/RE1" ]; then
 fi
 
 # Run experiment
-echo "Running CEAA pipeline..."
+echo "Running CAAA pipeline..."
 python -m src.main \
     --dataset RE1 \
     --system online-boutique \
@@ -2757,7 +2757,7 @@ echo "Experiment complete! Check outputs/results/ for results."
 ## Complete File Structure
 
 ```
-ceaa-project/
+caaa-project/
 ├── configs/
 │   └── config.yaml
 ├── data/
@@ -2826,7 +2826,7 @@ RESULTS SUMMARY
 Baseline (all anomalies = FAULT):
   FP Rate: 0.500  (50% of anomalies are actually load spikes)
 
-CEAA Model (random_forest):
+CAAA Model (random_forest):
   Accuracy: 0.85+
   F1 Score: 0.85+
   FP Rate: 0.15-0.25

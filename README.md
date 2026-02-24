@@ -350,8 +350,7 @@ CAAA/
 │   │   └── utils.py               # Shared base metrics generation utilities
 │   ├── features/
 │   │   ├── feature_schema.py       # Single source of truth for 36-dim layout
-│   │   ├── extractors.py           # Feature extraction from raw metrics
-│   │   └── context_features.py     # ContextFeatures dataclass (container only)
+│   │   └── extractors.py           # Feature extraction from raw metrics
 │   ├── models/
 │   │   ├── caaa_model.py           # CAAA neural model (proposed)
 │   │   ├── feature_encoder.py      # MLP-based feature encoder

@@ -338,21 +338,19 @@ class FaultGenerator:
         Returns:
             Tuple of (list of ServiceMetrics, fault_service name, fault_type).
         """
-        if case_seed is not None:
-            original_rng = self.rng
-            self.rng = np.random.default_rng(case_seed)
+        rng = np.random.default_rng(case_seed) if case_seed is not None else self.rng
 
         eligible_services = [s for s in self.SERVICE_NAMES[: self.n_services] if s != "loadgenerator"]
 
         if fault_type is None:
-            fault_type = str(self.rng.choice(self.FAULT_TYPES))
+            fault_type = str(rng.choice(self.FAULT_TYPES))
         if fault_service is None:
-            fault_service = str(self.rng.choice(eligible_services))
+            fault_service = str(rng.choice(eligible_services))
 
         # Fault starts at a random point in the middle third of the sequence
         mid_start = self.sequence_length // 3
         mid_end = 2 * self.sequence_length // 3
-        fault_start = int(self.rng.integers(mid_start, mid_end))
+        fault_start = int(rng.integers(mid_start, mid_end))
 
         logger.info(
             "Generating fault metrics: system=%s service=%s type=%s start=%d",
@@ -364,12 +362,9 @@ class FaultGenerator:
 
         results: List[ServiceMetrics] = []
         for name in self.SERVICE_NAMES[: self.n_services]:
-            df = self._base_metrics(name)
+            df = generate_base_metrics(self.sequence_length, name, rng=rng)
             if name == fault_service:
                 df = self._inject_fault(df, fault_type, fault_start)
             results.append(ServiceMetrics(service_name=name, metrics=df))
-
-        if case_seed is not None:
-            self.rng = original_rng
 
         return results, fault_service, fault_type
