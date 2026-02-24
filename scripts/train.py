@@ -24,6 +24,7 @@ from src.evaluation.metrics import (
     compute_false_positive_rate,
     print_evaluation_summary,
 )
+from src.features.feature_schema import N_FEATURES
 
 
 def main():
@@ -123,8 +124,11 @@ def main():
         all_pre = fault_cases + load_cases
         detected = []
         for case in all_pre:
-            _, max_score = detector.detect(case.services[0].metrics)
-            if max_score > 1.0:
+            # Check all services and take the max anomaly score
+            case_max_score = max(
+                detector.detect(svc.metrics)[1] for svc in case.services
+            )
+            if case_max_score > 1.0:
                 detected.append(case)
         fault_cases = [c for c in detected if c.label == "FAULT"]
         load_cases = [c for c in detected if c.label == "EXPECTED_LOAD"]
@@ -149,6 +153,9 @@ def main():
         X_train, y_train, test_size=0.125, random_state=args.seed, stratify=y_train,
     )
 
+    # Keep unscaled copies for tree-based baselines (scale-invariant)
+    X_train_unscaled, X_test_unscaled = X_train.copy(), X_test.copy()
+
     # Scale features (fit on train only) for neural models
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
@@ -157,7 +164,7 @@ def main():
 
     # Train CAAA model
     print(f"Training CAAA model for {args.epochs} epochs...")
-    model = CAAAModel(input_dim=36)
+    model = CAAAModel(input_dim=N_FEATURES)
     trainer = CAAATrainer(model, learning_rate=args.lr, device="cpu")
     trainer.train(
         X_train, y_train, X_val=X_cal, y_val=y_cal,
@@ -197,13 +204,13 @@ def main():
     trainer.save_model(save_path)
     print(f"Model saved to: {save_path}")
 
-    # Baseline comparison
+    # Baseline comparison (tree-based baselines use unscaled features)
     if args.baseline:
         print()
         print("Training BaselineClassifier...")
         bl = BaselineClassifier(random_state=args.seed)
-        bl.fit(X_train, y_train)
-        bl_pred = bl.predict(X_test)
+        bl.fit(X_train_unscaled, y_train)
+        bl_pred = bl.predict(X_test_unscaled)
         bl_metrics = compute_all_metrics(y_test, bl_pred, baseline_fp_rate=naive_fp)
 
         naive_metrics = compute_all_metrics(y_test, naive_pred, baseline_fp_rate=naive_fp)
@@ -230,12 +237,12 @@ def main():
         shap_dir = "outputs/results/shap"
         os.makedirs(shap_dir, exist_ok=True)
 
-        # RF baseline SHAP (fast)
+        # RF baseline SHAP (fast, uses unscaled features)
         print("\nComputing SHAP values for Baseline RF...")
         bl_for_shap = BaselineClassifier(random_state=args.seed)
-        bl_for_shap.fit(X_train, y_train)
+        bl_for_shap.fit(X_train_unscaled, y_train)
         plot_shap_summary(
-            bl_for_shap, X_test, ALL_FEATURE_NAMES,
+            bl_for_shap, X_test_unscaled, ALL_FEATURE_NAMES,
             save_path=os.path.join(shap_dir, "shap_baseline_rf.png"),
         )
         print(f"  Saved to {shap_dir}/shap_baseline_rf.png")

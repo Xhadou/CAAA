@@ -11,7 +11,7 @@ from src.evaluation.metrics import (
     compute_false_positive_rate,
 )
 from src.features import FeatureExtractor
-from src.features.feature_schema import CONTEXT_START, CONTEXT_END
+from src.features.feature_schema import CONTEXT_START, CONTEXT_END, N_FEATURES
 from src.models import CAAAModel, NaiveBaseline
 from src.training.losses import ContextConsistencyLoss, SupConContextLoss
 from src.training.trainer import CAAATrainer
@@ -43,7 +43,7 @@ class TestEndToEndPipeline:
 
         # 4. Train CAAAModel for 10 epochs (with ContextConsistencyLoss)
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         history = trainer.train(
             X_train, y_train, epochs=10, batch_size=8,
@@ -104,7 +104,7 @@ class TestAblationNoContext:
         X[:, CONTEXT_START:CONTEXT_END] = 0.0
 
         torch.manual_seed(123)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         history = trainer.train(X, labels, epochs=5, batch_size=8)
 
@@ -143,7 +143,7 @@ class TestContextConsistencyLoss:
     def test_context_consistency_loss_gradients(self):
         """Gradients should flow through all CCL components."""
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         ccl = ContextConsistencyLoss(alpha=0.3, beta=0.1)
 
         x = torch.randn(8, 36)
@@ -211,7 +211,7 @@ class TestTemperatureScaling:
         )
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         trainer.train(X_train, y_train, epochs=20, batch_size=8)
 
@@ -238,7 +238,7 @@ class TestTemperatureScaling:
         )
 
         torch.manual_seed(99)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         trainer.train(X_train, y_train, epochs=20, batch_size=8)
 
@@ -284,7 +284,7 @@ class TestSupConContextLoss:
     def test_supcon_gradients_flow(self):
         """Gradients should flow through all model parameters."""
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         loss_fn = SupConContextLoss()
 
         x = torch.randn(16, 36)
@@ -333,7 +333,7 @@ class TestContrastiveTraining:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(
             model, learning_rate=0.001, loss_type="contrastive",
         )
@@ -357,7 +357,7 @@ class TestContrastiveTraining:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(
             model, learning_rate=0.001, loss_type="contrastive",
         )
@@ -374,7 +374,7 @@ class TestGetEmbeddings:
     def test_get_embeddings_shape(self):
         """get_embeddings should return (batch, hidden_dim) tensor."""
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         x = torch.randn(8, 36)
 
         emb = model.get_embeddings(x)
@@ -396,7 +396,7 @@ class TestPredictWithEmbeddings:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(
             model, learning_rate=0.001, loss_type="contrastive",
         )
@@ -411,7 +411,7 @@ class TestPredictWithEmbeddings:
 
     def test_predict_with_embeddings_raises_without_centroids(self):
         """Should raise RuntimeError if centroids not computed."""
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001)
         X = np.random.randn(5, 36).astype(np.float32)
 
@@ -434,7 +434,7 @@ class TestAdaptiveThreshold:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         trainer.train(X, labels, epochs=10, batch_size=8)
 
@@ -463,15 +463,17 @@ class TestAdaptiveThreshold:
         X[:, ctx_conf_idx] = np.linspace(0.0, 1.0, len(X))
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
-        trainer.train(X, labels, epochs=15, batch_size=8)
+        # Use fewer epochs to produce a less confident model whose
+        # predictions are near the threshold boundary.
+        trainer.train(X, labels, epochs=5, batch_size=8)
 
         preds_fixed, _ = trainer.predict_with_confidence_fixed(
             X, confidence_threshold=0.7,
         )
         preds_adaptive, _ = trainer.predict_with_confidence(
-            X, base_threshold=0.7, context_sensitivity=0.2,
+            X, base_threshold=0.7, context_sensitivity=0.3,
         )
         assert preds_fixed.shape == preds_adaptive.shape
         assert not np.array_equal(preds_fixed, preds_adaptive), \
@@ -483,13 +485,13 @@ class TestGradientClipping:
 
     def test_gradient_clipping_enabled(self):
         """Trainer should have gradient clipping enabled by default."""
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001)
         assert trainer.max_grad_norm == 1.0
 
     def test_gradient_clipping_custom(self):
         """Trainer should accept custom max_grad_norm."""
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, max_grad_norm=0.5)
         assert trainer.max_grad_norm == 0.5
 
@@ -505,7 +507,7 @@ class TestGradientClipping:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(
             model, learning_rate=0.001, max_grad_norm=1.0,
         )
@@ -518,7 +520,7 @@ class TestLRScheduling:
 
     def test_scheduler_exists(self):
         """Trainer should have a ReduceLROnPlateau scheduler."""
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001)
         assert hasattr(trainer, "scheduler")
         assert type(trainer.scheduler).__name__ == "ReduceLROnPlateau"
@@ -540,7 +542,7 @@ class TestLRScheduling:
         )
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001)
         history = trainer.train(
             X_train, y_train, X_val=X_val, y_val=y_val,

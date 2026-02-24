@@ -168,9 +168,11 @@ def run_pipeline(
         missed = 0
 
         for case in all_cases:
-            # Use first service's metrics for detection
-            _, max_score = detector.detect(case.services[0].metrics)
-            if max_score > 1.0:
+            # Check all services and take the max anomaly score
+            case_max_score = max(
+                detector.detect(svc.metrics)[1] for svc in case.services
+            )
+            if case_max_score > 1.0:
                 detected_cases.append(case)
                 detected_labels.append(case.label)
             else:

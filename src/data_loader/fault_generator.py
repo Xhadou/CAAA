@@ -280,11 +280,42 @@ class FaultGenerator:
     # Public API
     # ------------------------------------------------------------------
 
+    def inject_fault(
+        self, df: pd.DataFrame, fault_type: str, fault_start: int
+    ) -> pd.DataFrame:
+        """Inject a fault into the metrics starting at fault_start.
+
+        Public wrapper around the internal fault injection logic.
+
+        Args:
+            df: Baseline metrics DataFrame.
+            fault_type: One of the 11 supported fault types.
+            fault_start: Index at which the fault begins.
+
+        Returns:
+            Modified DataFrame with the fault injected.
+        """
+        return self._inject_fault(df, fault_type, fault_start)
+
+    def generate_base_metrics(self, service_name: str) -> pd.DataFrame:
+        """Generate a DataFrame of normal-operation metrics for one service.
+
+        Public wrapper around the internal base metrics generation.
+
+        Args:
+            service_name: Name of the service.
+
+        Returns:
+            DataFrame with normal baseline metrics.
+        """
+        return self._base_metrics(service_name)
+
     def generate_fault_metrics(
         self,
         system: str = "online-boutique",
         fault_type: Optional[str] = None,
         fault_service: Optional[str] = None,
+        case_seed: Optional[int] = None,
     ) -> Tuple[List[ServiceMetrics], str, str]:
         """Generate metrics that simulate a fault in one microservice.
 
@@ -300,10 +331,17 @@ class FaultGenerator:
                 types if not given.
             fault_service: Service to inject the fault into. Random (excluding
                 loadgenerator) if not given.
+            case_seed: When provided, an independent RNG seeded with this
+                value is used for this call, avoiding sequential state
+                dependence on ``self.rng``.
 
         Returns:
             Tuple of (list of ServiceMetrics, fault_service name, fault_type).
         """
+        if case_seed is not None:
+            original_rng = self.rng
+            self.rng = np.random.default_rng(case_seed)
+
         eligible_services = [s for s in self.SERVICE_NAMES[: self.n_services] if s != "loadgenerator"]
 
         if fault_type is None:
@@ -330,5 +368,8 @@ class FaultGenerator:
             if name == fault_service:
                 df = self._inject_fault(df, fault_type, fault_start)
             results.append(ServiceMetrics(service_name=name, metrics=df))
+
+        if case_seed is not None:
+            self.rng = original_rng
 
         return results, fault_service, fault_type

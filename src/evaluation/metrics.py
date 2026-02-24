@@ -108,9 +108,12 @@ def compute_all_metrics(
     Returns:
         Dictionary with:
             - accuracy: Overall accuracy (UNKNOWN counted as incorrect).
+            - known_accuracy: Accuracy over definitive (non-UNKNOWN) predictions only.
             - precision: Weighted precision (on known predictions only).
             - recall: Weighted recall (on known predictions only).
             - f1: Weighted F1 score (on known predictions only).
+            - coverage_adjusted_f1: F1 × (1 - unknown_rate), rewarding
+              both correctness and decisiveness.
             - fp_rate: False positive rate for FAULT class.
             - fault_recall: Recall for the fault class.
             - fp_reduction: FP reduction vs baseline (if baseline_fp_rate provided).
@@ -133,16 +136,22 @@ def compute_all_metrics(
         f1 = f1_score(
             y_true_known, y_pred_known, average="weighted", zero_division=0
         )
+        known_accuracy = float(accuracy_score(y_true_known, y_pred_known))
     else:
         precision = 0.0
         recall = 0.0
         f1 = 0.0
+        known_accuracy = 0.0
+
+    coverage_adjusted_f1 = f1 * (1.0 - unknown_rate)
 
     metrics: Dict[str, float] = {
         "accuracy": accuracy_score(y_true, y_pred),
+        "known_accuracy": known_accuracy,
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "coverage_adjusted_f1": coverage_adjusted_f1,
         "fp_rate": compute_false_positive_rate(y_true, y_pred),
         "fault_recall": compute_fault_recall(y_true, y_pred),
         "unknown_rate": unknown_rate,

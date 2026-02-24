@@ -108,6 +108,19 @@ class SyntheticMetricsGenerator:
     # Public API
     # ------------------------------------------------------------------
 
+    def generate_base_metrics(self, service_name: str) -> pd.DataFrame:
+        """Generate a DataFrame of normal-operation metrics for one service.
+
+        Public wrapper around the internal base metrics generation.
+
+        Args:
+            service_name: Name of the service.
+
+        Returns:
+            DataFrame with normal baseline metrics.
+        """
+        return self._base_metrics(service_name)
+
     def generate_normal_metrics(
         self, system: str = "online-boutique"
     ) -> List[ServiceMetrics]:
@@ -131,6 +144,7 @@ class SyntheticMetricsGenerator:
         system: str = "online-boutique",
         load_multiplier: Optional[float] = None,
         event_type: Optional[str] = None,
+        case_seed: Optional[int] = None,
     ) -> Tuple[List[ServiceMetrics], Dict]:
         """Generate metrics showing a legitimate load spike.
 
@@ -148,10 +162,16 @@ class SyntheticMetricsGenerator:
             load_multiplier: Peak multiplier for load metrics. Sampled from
                 the event type's range if not provided.
             event_type: Type of event causing the spike. Random if not provided.
+            case_seed: When provided, an independent RNG seeded with this
+                value is used for this call, avoiding sequential state
+                dependence on ``self.rng``.
 
         Returns:
             Tuple of (list of ServiceMetrics, context dict).
         """
+        if case_seed is not None:
+            original_rng = self.rng
+            self.rng = np.random.default_rng(case_seed)
         if event_type is None:
             event_type = str(self.rng.choice(EVENT_TYPES))
 
@@ -217,4 +237,8 @@ class SyntheticMetricsGenerator:
             "ramp_length": int(ramp_len),
             "event_name": f"{event_type}_event",
         }
+
+        if case_seed is not None:
+            self.rng = original_rng
+
         return results, context
