@@ -149,17 +149,19 @@ class CAAATrainer:
                 y_batch = y_train_t[batch_idx]
 
                 self.optimizer.zero_grad()
-                logits = self.model(X_batch)
                 if self.loss_type == "contrastive":
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
                     embeddings = self.model.get_embeddings(X_batch)
+                    logits = self.model.classifier(embeddings)
                     loss, components = self.criterion(
                         embeddings, logits, y_batch, context,
                     )
                 elif self.use_context_loss:
+                    logits = self.model(X_batch)
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
                     loss, components = self.criterion(logits, y_batch, context)
                 else:
+                    logits = self.model(X_batch)
                     loss = self.criterion(logits, y_batch)
                 loss.backward()
                 if self.max_grad_norm > 0:

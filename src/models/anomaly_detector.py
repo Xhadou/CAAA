@@ -246,7 +246,7 @@ class AnomalyDetector:
         }, path)
 
     def load(self, path: str, n_features: int) -> None:
-        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         cfg = checkpoint["config"]
         self.model = LSTMAutoencoder(
             n_features=n_features,

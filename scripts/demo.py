@@ -72,17 +72,24 @@ def main():
         X, labels, test_size=0.2, random_state=args.seed, stratify=labels
     )
 
+    # Further split training data for validation (avoids data leakage)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train, y_train, test_size=0.125, random_state=args.seed, stratify=y_train,
+    )
+
     # Scale features (fit on train only) for neural models
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
+    X_val = scaler.transform(X_val)
     X_test = scaler.transform(X_test)
 
     # Train CAAA model
     print("Training CAAA model...")
-    model = CAAAModel(input_dim=36)
-    trainer = CAAATrainer(model, learning_rate=0.001, device="cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = CAAAModel(input_dim=X_train.shape[1])
+    trainer = CAAATrainer(model, learning_rate=0.001, device=device)
     trainer.train(
-        X_train, y_train, X_val=X_test, y_val=y_test,
+        X_train, y_train, X_val=X_val, y_val=y_val,
         epochs=args.epochs, batch_size=16, early_stopping_patience=10,
     )
 

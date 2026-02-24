@@ -164,8 +164,9 @@ def main():
 
     # Train CAAA model
     print(f"Training CAAA model for {args.epochs} epochs...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = CAAAModel(input_dim=N_FEATURES)
-    trainer = CAAATrainer(model, learning_rate=args.lr, device="cpu")
+    trainer = CAAATrainer(model, learning_rate=args.lr, device=device)
     trainer.train(
         X_train, y_train, X_val=X_cal, y_val=y_cal,
         epochs=args.epochs, batch_size=args.batch_size,

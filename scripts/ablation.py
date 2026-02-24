@@ -59,9 +59,10 @@ def run_caaa_variant(
         Dictionary of evaluation metrics.
     """
     torch.manual_seed(seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
     trainer = CAAATrainer(
-        model, learning_rate=lr, device="cpu",
+        model, learning_rate=lr, device=device,
         use_context_loss=use_context_loss,
         loss_type=loss_type,
     )
@@ -481,9 +482,10 @@ def main():
 
     # Re-run Full CAAA on last fold to get predictions for breakdown
     torch.manual_seed(args.base_seed)
+    _ft_device = "cuda" if torch.cuda.is_available() else "cpu"
     _ft_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
     _ft_trainer = CAAATrainer(
-        _ft_model, learning_rate=args.lr, device="cpu",
+        _ft_model, learning_rate=args.lr, device=_ft_device,
         use_context_loss=True,
     )
     _ft_trainer.train(
@@ -561,9 +563,10 @@ def main():
         # Full CAAA (uses KernelExplainer, slower)
         print("  Full CAAA SHAP (KernelExplainer, may take a moment)...")
         torch.manual_seed(args.base_seed)
+        _shap_device = "cuda" if torch.cuda.is_available() else "cpu"
         caaa_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         caaa_trainer = CAAATrainer(
-            caaa_model, learning_rate=args.lr, device="cpu",
+            caaa_model, learning_rate=args.lr, device=_shap_device,
             use_context_loss=True,
         )
         caaa_trainer.train(
@@ -595,9 +598,10 @@ def main():
 
         # Train a fresh Full CAAA model for calibration analysis
         torch.manual_seed(args.base_seed)
+        _cal_device = "cuda" if torch.cuda.is_available() else "cpu"
         cal_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         cal_trainer = CAAATrainer(
-            cal_model, learning_rate=args.lr, device="cpu",
+            cal_model, learning_rate=args.lr, device=_cal_device,
             use_context_loss=True,
         )
         cal_trainer.train(
