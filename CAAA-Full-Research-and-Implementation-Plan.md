@@ -2580,7 +2580,7 @@ def run_pipeline(
         output_dir: Output directory
     """
     print("="*60)
-    print("CAAA: Context-Enriched Anomaly Attribution")
+    print("CAAA: Context-Aware Anomaly Attribution")
     print("="*60)
     print(f"\nConfiguration:")
     print(f"  Dataset: {dataset}/{system}")
@@ -2672,7 +2672,7 @@ def run_pipeline(
     return classifier, model_metrics
 
 def main():
-    parser = argparse.ArgumentParser(description="CAAA: Context-Enriched Anomaly Attribution")
+    parser = argparse.ArgumentParser(description="CAAA: Context-Aware Anomaly Attribution")
     
     parser.add_argument('--dataset', type=str, default='RE1',
                        choices=['RE1', 'RE2', 'RE3'],
@@ -2712,7 +2712,7 @@ Create file: `run_experiment.sh`
 
 set -e
 
-echo "CAAA: Context-Enriched Anomaly Attribution"
+echo "CAAA: Context-Aware Anomaly Attribution"
 echo "==========================================="
 
 # Check Python version

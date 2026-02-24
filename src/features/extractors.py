@@ -61,18 +61,6 @@ def _linear_slope(arr: np.ndarray) -> float:
     return float(coeffs[0]) if np.isfinite(coeffs[0]) else 0.0
 
 
-def _detect_change_point_cached(
-    series: np.ndarray, penalty: float = 10,
-) -> Tuple[int, float, float]:
-    """Thin wrapper around :func:`_detect_change_point`.
-
-    The ``lru_cache`` that previously decorated this function has been
-    removed because floating-point time-series virtually never repeat
-    exactly, so the cache added overhead (tuple conversion + hashing)
-    without meaningful hit-rate benefit.
-    """
-    return _detect_change_point(series, penalty)
-
 
 def _detect_change_point(
     series: np.ndarray, penalty: float = 10,
@@ -287,7 +275,7 @@ class FeatureExtractor:
         # 6. change_point_magnitude (replaces memory_trend_uniformity)
         magnitudes = []
         for cpu in cpu_arrays:
-            _, mag, _ = _detect_change_point_cached(cpu)
+            _, mag, _ = _detect_change_point(cpu)
             magnitudes.append(mag)
         change_point_magnitude = float(np.mean(magnitudes))
 
@@ -315,7 +303,7 @@ class FeatureExtractor:
         # 7. onset_gradient (change-point-based abruptness via PELT)
         abruptness_values = []
         for cpu in cpu_arrays:
-            _, _, abruptness = _detect_change_point_cached(cpu)
+            _, _, abruptness = _detect_change_point(cpu)
             abruptness_values.append(abruptness)
         onset_gradient = float(np.mean(abruptness_values))
 
