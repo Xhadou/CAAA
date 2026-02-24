@@ -514,7 +514,7 @@ python -m pytest tests/ -v --cov=src --cov-report=term-missing
 | `tests/test_integration.py` | End-to-end training and evaluation pipeline |
 | `tests/test_plan_modules.py` | Sklearn classifier wrappers |
 | `tests/test_rcaeval_pipeline.py` | RCAEval data loading and processing |
-| `tests/test_remaining_fixes.py` | Verification of code review fixes (vectorization, type hints, exports) |
+| `tests/test_review_fixes.py` | Code review fix verification (device detection, vectorization, type hints, exports, performance) |
 
 Run individual modules for faster feedback:
 
@@ -522,7 +522,7 @@ Run individual modules for faster feedback:
 python -m pytest tests/test_models.py -v        # ~10 seconds
 python -m pytest tests/test_features.py -v       # ~5 seconds
 python -m pytest tests/test_integration.py -v    # ~30 seconds
-python -m pytest tests/test_remaining_fixes.py -v # ~5 seconds
+python -m pytest tests/test_review_fixes.py -v   # ~5 seconds
 ```
 
 ---

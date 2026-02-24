@@ -245,12 +245,21 @@ class CAAATrainer:
 
         self.model.eval()
         with torch.no_grad():
-            logits = self.model(X_t)
-            if self.use_context_loss:
+            if self.loss_type == "contrastive":
+                context = X_t[:, _CONTEXT_START:_CONTEXT_END]
+                embeddings = self.model.get_embeddings(X_t)
+                logits = self.model.classifier(embeddings)
+                loss_tensor, _ = self.criterion(
+                    embeddings, logits, y_t, context,
+                )
+                loss = loss_tensor.item()
+            elif self.use_context_loss:
+                logits = self.model(X_t)
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 loss_tensor, _ = self.criterion(logits, y_t, context)
                 loss = loss_tensor.item()
             else:
+                logits = self.model(X_t)
                 loss = self.criterion(logits, y_t).item()
             preds = torch.argmax(logits, dim=-1)
             accuracy = (preds == y_t).float().mean().item()

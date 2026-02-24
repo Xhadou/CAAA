@@ -371,7 +371,7 @@ CAAA/
 │   ├── test_models.py             # Model component tests
 │   ├── test_integration.py        # End-to-end pipeline tests
 │   ├── test_plan_modules.py       # Sklearn classifier tests
-│   ├── test_remaining_fixes.py    # Verification of code review fixes
+│   ├── test_review_fixes.py       # Code review fix verification
 │   └── test_rcaeval_pipeline.py   # RCAEval integration tests
 ├── GETTING_STARTED.md               # Step-by-step starter guide
 ├── CAAA Literature Review.md        # 150+ paper literature review
@@ -419,6 +419,7 @@ The trainer includes several features for stable and reliable training:
 - **Feature dimensionality**: All scripts import `N_FEATURES` from `src.features.feature_schema` rather than hard-coding `36`, maintaining a single source of truth for the feature vector layout.
 - **Cached change-point detection**: The PELT change-point detection function (`_detect_change_point_cached`) uses `@functools.lru_cache(maxsize=4096)` for O(1) repeated lookups, reducing feature extraction time for repeated or similar cases.
 - **Vectorized cross-service correlation**: The `cross_service_sync` feature uses `np.corrcoef` on the full CPU matrix instead of O(n²) pairwise Pearson correlations, with explicit filtering of constant series to avoid NaN values.
+- **Optimized feature extraction**: Feature methods pre-extract metric arrays once per service instead of repeated `.values` lookups, and statistical features use `np.concatenate` + `np.mean`/`np.std` directly instead of `pd.concat().mean()` to avoid per-case DataFrame allocation overhead.
 
 ### Evaluation Parameters
 
@@ -461,7 +462,7 @@ python -m pytest tests/test_features.py -v        # Feature extraction
 python -m pytest tests/test_data_loader.py -v     # Data generation
 python -m pytest tests/test_plan_modules.py -v    # Sklearn classifiers
 python -m pytest tests/test_rcaeval_pipeline.py -v # RCAEval integration
-python -m pytest tests/test_remaining_fixes.py -v  # Code review fix verification
+python -m pytest tests/test_review_fixes.py -v     # Code review fix verification
 ```
 
 ## Related Work

@@ -72,7 +72,9 @@ def main():
         X, labels, test_size=0.2, random_state=args.seed, stratify=labels
     )
 
-    # Further split training data for validation (avoids data leakage)
+    # Further split training data for validation (avoids data leakage).
+    # 12.5% of the 80% training split ≈ 10% of total data, giving a
+    # ~70/10/20 train/val/test split.
     X_train, X_val, y_train, y_val = train_test_split(
         X_train, y_train, test_size=0.125, random_state=args.seed, stratify=y_train,
     )
