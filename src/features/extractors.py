@@ -9,6 +9,7 @@ via the ``ruptures`` library, inspired by BARO (FSE 2024) which showed that
 Bayesian change point detection before RCA improves results by 58-189%.
 """
 
+import functools
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -60,6 +61,7 @@ def _linear_slope(arr: np.ndarray) -> float:
     return float(coeffs[0]) if np.isfinite(coeffs[0]) else 0.0
 
 
+@functools.lru_cache(maxsize=4096)
 def _detect_change_point_cached(
     series_tuple: Tuple[float, ...], penalty: float = 10,
 ) -> Tuple[int, float, float]:
@@ -432,24 +434,36 @@ class FeatureExtractor:
         )
 
         # 15. time_seasonality – derive from mean service timestamp
+        # Synthetic timestamps are np.arange(n) (integers 0–59), producing
+        # a constant ~0.306 for all cases.  We set 0.5 (neutral) for
+        # synthetic data; this feature only activates on real-world data
+        # with epoch-based timestamps.
         if services:
             mean_ts = np.mean(
                 [svc.metrics["timestamp"].mean() for svc in services]
             )
-            hour = mean_ts % 24
-            if 9 <= hour <= 20:
-                time_seasonality = 0.7 + 0.3 * (hour - 9) / 11.0
+            # Detect synthetic timestamps: if mean_ts < 1_000_000, the
+            # timestamps are likely sequential integers, not epoch seconds.
+            if mean_ts < 1_000_000:
+                time_seasonality = 0.5
             else:
-                h = hour if hour < 9 else hour - 20
-                time_seasonality = 0.1 + 0.3 * h / 8.0
-            time_seasonality = float(
-                np.clip(time_seasonality + rng.uniform(-0.05, 0.05), 0.0, 1.0)
-            )
+                hour = mean_ts % 24
+                if 9 <= hour <= 20:
+                    time_seasonality = 0.7 + 0.3 * (hour - 9) / 11.0
+                else:
+                    h = hour if hour < 9 else hour - 20
+                    time_seasonality = 0.1 + 0.3 * h / 8.0
+                time_seasonality = float(
+                    np.clip(time_seasonality + rng.uniform(-0.05, 0.05), 0.0, 1.0)
+                )
         else:
             time_seasonality = 0.5
 
         # 16. recent_deployment – label-independent base rate of 0.15
-        recent_deployment = 0.3 * rng.random() if rng.random() < 0.15 else 0.0
+        if rng.random() < 0.15:
+            recent_deployment = 0.3 * rng.random()
+        else:
+            recent_deployment = 0.0
 
         # 17. context_confidence (with Gaussian noise, std=0.1)
         conf = 0.0

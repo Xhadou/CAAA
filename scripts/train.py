@@ -24,6 +24,7 @@ from src.evaluation.metrics import (
     compute_false_positive_rate,
     print_evaluation_summary,
 )
+from src.features.feature_schema import N_FEATURES
 
 
 def main():
@@ -157,7 +158,7 @@ def main():
 
     # Train CAAA model
     print(f"Training CAAA model for {args.epochs} epochs...")
-    model = CAAAModel(input_dim=36)
+    model = CAAAModel(input_dim=N_FEATURES)
     trainer = CAAATrainer(model, learning_rate=args.lr, device="cpu")
     trainer.train(
         X_train, y_train, X_val=X_cal, y_val=y_cal,

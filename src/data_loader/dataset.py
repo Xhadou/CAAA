@@ -50,8 +50,9 @@ def generate_combined_dataset(
     logger.info("Generating %d fault cases", n_fault)
     for i in range(n_fault):
         system = systems[i % len(systems)]
+        case_seed = seed * 10000 + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
-            system=system
+            system=system, case_seed=case_seed,
         )
         fault_context = {}
         if rng.random() < 0.3:
@@ -83,7 +84,10 @@ def generate_combined_dataset(
     logger.info("Generating %d expected-load cases", n_load)
     for i in range(n_load):
         system = systems[i % len(systems)]
-        services, context = load_gen.generate_load_spike_metrics(system=system)
+        case_seed = (seed + 1) * 10000 + i
+        services, context = load_gen.generate_load_spike_metrics(
+            system=system, case_seed=case_seed,
+        )
         # 15% of load cases get empty context (simulating unscheduled load
         # spikes with no calendar entry) to prevent label leakage.
         if rng.random() < 0.15:
@@ -344,8 +348,12 @@ def generate_hard_dataset(
     # --- (a) FAULT_DURING_EVENT: fault injected on top of load spike ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
+        case_seed_load = seed * 10000 + i
+        case_seed_fault = seed * 10000 + 1000 + i
         # Generate a load spike first
-        services, context = load_gen.generate_load_spike_metrics(system=system)
+        services, context = load_gen.generate_load_spike_metrics(
+            system=system, case_seed=case_seed_load,
+        )
         # Pick a random service (not loadgenerator) to inject a fault
         eligible = [s for s in services if s.service_name != "loadgenerator"]
         fault_svc = eligible[rng.integers(len(eligible))]
@@ -353,7 +361,7 @@ def generate_hard_dataset(
         # Inject fault at a random point during the spike
         n_ts = len(fault_svc.metrics)
         fault_start = int(rng.integers(n_ts // 4, 3 * n_ts // 4))
-        fault_svc.metrics = fault_gen._inject_fault(
+        fault_svc.metrics = fault_gen.inject_fault(
             fault_svc.metrics, fault_type, fault_start,
         )
         fault_cases.append(
@@ -371,9 +379,10 @@ def generate_hard_dataset(
     # --- (b) CAPACITY_EXCEEDED_LOAD: extreme load causes errors ---
     for i in range(n_load_per_type):
         system = systems[i % len(systems)]
+        case_seed_b = seed * 10000 + 2000 + i
         high_mult = float(rng.uniform(5.0, 10.0))
         services, context = load_gen.generate_load_spike_metrics(
-            system=system, load_multiplier=high_mult,
+            system=system, load_multiplier=high_mult, case_seed=case_seed_b,
         )
         # Add load-correlated error increases (0.05-0.15) during the spike
         spike_start = context.get("spike_start", 0)
@@ -404,8 +413,9 @@ def generate_hard_dataset(
     # --- (c) GRADUAL_FAULT: slow ramp-up over full window ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
+        case_seed_c = seed * 10000 + 3000 + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
-            system=system,
+            system=system, case_seed=case_seed_c,
         )
         # Replace the sudden fault with a gradual ramp over the full window
         for svc in services:
@@ -443,8 +453,9 @@ def generate_hard_dataset(
     # --- (e) CORRELATED_FAULT: fault propagates to neighbor services ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
+        case_seed_e = seed * 10000 + 4000 + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
-            system=system,
+            system=system, case_seed=case_seed_e,
         )
         # Pick 2-3 neighbor services and inject attenuated faults
         neighbors = _SERVICE_ADJACENCY.get(fault_service, [])
@@ -496,7 +507,10 @@ def generate_hard_dataset(
     # --- (d) PARTIAL_LOAD: spike affects only 3-4 services ---
     for i in range(n_load_per_type):
         system = systems[i % len(systems)]
-        services, context = load_gen.generate_load_spike_metrics(system=system)
+        case_seed_d = seed * 10000 + 5000 + i
+        services, context = load_gen.generate_load_spike_metrics(
+            system=system, case_seed=case_seed_d,
+        )
         # Reset most services to baseline (keep only 3-4 affected)
         n_affected = rng.integers(
             min(3, len(services)), min(5, len(services)) + 1,
@@ -507,7 +521,7 @@ def generate_hard_dataset(
         for idx, svc in enumerate(services):
             if idx not in affected_indices:
                 # Regenerate as normal baseline metrics
-                svc.metrics = load_gen._base_metrics(svc.service_name)
+                svc.metrics = load_gen.generate_base_metrics(svc.service_name)
         load_cases.append(
             AnomalyCase(
                 case_id=f"hard_partial_load_{i:04d}",

@@ -22,6 +22,7 @@ from src.features.feature_schema import (
     WORKLOAD_RANGE,
     STATISTICAL_RANGE,
     SERVICE_LEVEL_RANGE,
+    N_FEATURES,
 )
 from src.models import CAAAModel, BaselineClassifier, NaiveBaseline, RuleBasedBaseline, XGBoostBaseline
 from src.training.trainer import CAAATrainer
@@ -58,7 +59,7 @@ def run_caaa_variant(
         Dictionary of evaluation metrics.
     """
     torch.manual_seed(seed)
-    model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+    model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
     trainer = CAAATrainer(
         model, learning_rate=lr, device="cpu",
         use_context_loss=use_context_loss,
@@ -480,7 +481,7 @@ def main():
 
     # Re-run Full CAAA on last fold to get predictions for breakdown
     torch.manual_seed(args.base_seed)
-    _ft_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+    _ft_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
     _ft_trainer = CAAATrainer(
         _ft_model, learning_rate=args.lr, device="cpu",
         use_context_loss=True,
@@ -560,7 +561,7 @@ def main():
         # Full CAAA (uses KernelExplainer, slower)
         print("  Full CAAA SHAP (KernelExplainer, may take a moment)...")
         torch.manual_seed(args.base_seed)
-        caaa_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        caaa_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         caaa_trainer = CAAATrainer(
             caaa_model, learning_rate=args.lr, device="cpu",
             use_context_loss=True,
@@ -594,7 +595,7 @@ def main():
 
         # Train a fresh Full CAAA model for calibration analysis
         torch.manual_seed(args.base_seed)
-        cal_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        cal_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         cal_trainer = CAAATrainer(
             cal_model, learning_rate=args.lr, device="cpu",
             use_context_loss=True,

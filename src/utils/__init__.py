@@ -1,6 +1,6 @@
 """Shared utility functions for the CAAA pipeline."""
 
-from typing import Dict
+from typing import Dict, List
 
 # ── Label constants ───────────────────────────────────────────────────
 
@@ -17,7 +17,7 @@ LABEL_TO_INT: Dict[str, int] = {
 INT_TO_LABEL: Dict[int, str] = {v: k for k, v in LABEL_TO_INT.items()}
 
 
-def labels_to_int(labels, label_map=None):
+def labels_to_int(labels, label_map=None) -> List[int]:
     """Convert string labels to integer encoding.
 
     Args:
@@ -32,7 +32,7 @@ def labels_to_int(labels, label_map=None):
     return [label_map[label] for label in labels]
 
 
-def int_to_labels(ints, label_map=None):
+def int_to_labels(ints, label_map=None) -> List[str]:
     """Convert integer labels back to strings.
 
     Args:

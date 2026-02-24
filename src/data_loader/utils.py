@@ -32,7 +32,9 @@ def generate_base_metrics(
         rng = np.random.default_rng()
 
     n = sequence_length
-    noise = lambda scale: rng.normal(0, scale, n)
+
+    def noise(scale):
+        return rng.normal(0, scale, n)
 
     cpu = rng.uniform(10, 30) + noise(2)
     mem = rng.uniform(20, 40) + noise(1.5)
