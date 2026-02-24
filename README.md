@@ -65,7 +65,7 @@ CAAA uses an optional two-stage pipeline:
 
 ### Stage 1 (Optional): Anomaly Detection
 
-An LSTM autoencoder trained on normal (expected-load) metrics identifies anomalous time windows via reconstruction error. Only anomalous windows proceed to Stage 2. Enable with the `--anomaly-detector` flag.
+An LSTM autoencoder trained on normal (expected-load) metrics identifies anomalous time windows via reconstruction error. The pre-filter checks **all services** in each case and takes the maximum anomaly score — a fault in any service triggers detection. Only anomalous windows proceed to Stage 2. Enable with the `--anomaly-detector` flag.
 
 ### Stage 2: Anomaly Attribution
 
@@ -103,7 +103,7 @@ The system extracts a 36-dimensional feature vector organized into 5 groups, def
 |-------|------|----------|---------|
 | **Workload** | 0–5 | `global_load_ratio`, `cpu_request_correlation`, `cross_service_sync`, `error_rate_delta`, `latency_cpu_correlation`, `change_point_magnitude` | Characterize whether metric changes correlate with workload |
 | **Behavioral** | 6–11 | `onset_gradient`, `peak_duration`, `cascade_score`, `recovery_indicator`, `affected_service_ratio`, `variance_change_ratio` | Capture fault propagation signatures vs. smooth load ramps |
-| **Context** | 12–16 | `event_active`, `event_expected_impact`, `time_seasonality`, `recent_deployment`, `context_confidence` | External context signals (the key innovation) |
+| **Context** | 12–16 | `event_active`, `event_expected_impact`, `time_seasonality`, `recent_deployment`, `context_confidence` | External context signals (the key innovation). `time_seasonality` returns a neutral 0.5 for synthetic data (sequential integer timestamps) and only activates on real-world epoch-based timestamps. |
 | **Statistical** | 17–29 | Mean/std of CPU, memory, requests, errors, latency, network; `max_error_rate` | Standard metric statistics |
 | **Service-Level** | 30–35 | `n_services`, `max_cpu_service_ratio`, `max_error_service_ratio`, `cpu_spread`, `error_spread`, `latency_spread` | Cross-service aggregation patterns |
 
@@ -304,7 +304,9 @@ Every experiment prints the following metrics to the console and logs them for a
 | Metric | Description |
 |--------|-------------|
 | **Accuracy** | Overall classification accuracy (UNKNOWN counted as incorrect) |
+| **Known Accuracy** | Accuracy computed only over definitive (non-UNKNOWN) predictions |
 | **F1 Score** | Harmonic mean of precision and recall (on known predictions only) |
+| **Coverage-Adjusted F1** | F1 × (1 − unknown_rate) — rewards both correctness and decisiveness |
 | **FP Rate** | False positive rate (loads misclassified as faults). UNKNOWN predictions are excluded — see `known_fp_rate` for a coverage-adjusted view |
 | **Known FP Rate** | FP rate computed only over samples with a definitive (non-UNKNOWN) prediction |
 | **Fault Recall** | Proportion of true faults correctly identified |
@@ -349,7 +351,7 @@ CAAA/
 │   ├── features/
 │   │   ├── feature_schema.py       # Single source of truth for 36-dim layout
 │   │   ├── extractors.py           # Feature extraction from raw metrics
-│   │   └── context_features.py     # Context feature computation
+│   │   └── context_features.py     # ContextFeatures dataclass (container only)
 │   ├── models/
 │   │   ├── caaa_model.py           # CAAA neural model (proposed)
 │   │   ├── feature_encoder.py      # MLP-based feature encoder
@@ -369,6 +371,7 @@ CAAA/
 │   ├── test_models.py             # Model component tests
 │   ├── test_integration.py        # End-to-end pipeline tests
 │   ├── test_plan_modules.py       # Sklearn classifier tests
+│   ├── test_remaining_fixes.py    # Verification of code review fixes
 │   └── test_rcaeval_pipeline.py   # RCAEval integration tests
 ├── GETTING_STARTED.md               # Step-by-step starter guide
 ├── CAAA Literature Review.md        # 150+ paper literature review
@@ -410,9 +413,12 @@ The trainer includes several features for stable and reliable training:
 
 - **Gradient clipping**: Applied by default with `max_grad_norm=1.0` to prevent exploding gradients.
 - **ReduceLROnPlateau scheduler**: Automatically halves the learning rate when validation loss plateaus (patience=5, min_lr=1e-6).
-- **StandardScaler**: Input features should be standardized (zero mean, unit variance) before training. Use `sklearn.preprocessing.StandardScaler` fitted on training data only.
+- **StandardScaler**: Input features should be standardized (zero mean, unit variance) before training neural models. Use `sklearn.preprocessing.StandardScaler` fitted on training data only. Tree-based baselines (RandomForest, XGBoost) are trained on unscaled features for consistency with their scale-invariant nature.
 - **Temperature calibration**: Post-hoc temperature scaling for calibrated confidence scores, using validation data.
-- **Instance-level RNG**: All data generators use `np.random.default_rng(seed)` for per-instance reproducibility — multiple generators can coexist without corrupting each other's random state.
+- **Instance-level RNG**: All data generators use `np.random.default_rng(seed)` for per-instance reproducibility — multiple generators can coexist without corrupting each other's random state. Additionally, per-case seeds (`case_seed` parameter) ensure that generation order does not create subtle statistical dependence between training and evaluation data.
+- **Feature dimensionality**: All scripts import `N_FEATURES` from `src.features.feature_schema` rather than hard-coding `36`, maintaining a single source of truth for the feature vector layout.
+- **Cached change-point detection**: The PELT change-point detection function (`_detect_change_point_cached`) uses `@functools.lru_cache(maxsize=4096)` for O(1) repeated lookups, reducing feature extraction time for repeated or similar cases.
+- **Vectorized cross-service correlation**: The `cross_service_sync` feature uses `np.corrcoef` on the full CPU matrix instead of O(n²) pairwise Pearson correlations, with explicit filtering of constant series to avoid NaN values.
 
 ### Evaluation Parameters
 
@@ -455,6 +461,7 @@ python -m pytest tests/test_features.py -v        # Feature extraction
 python -m pytest tests/test_data_loader.py -v     # Data generation
 python -m pytest tests/test_plan_modules.py -v    # Sklearn classifiers
 python -m pytest tests/test_rcaeval_pipeline.py -v # RCAEval integration
+python -m pytest tests/test_remaining_fixes.py -v  # Code review fix verification
 ```
 
 ## Related Work

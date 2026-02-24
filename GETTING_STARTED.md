@@ -160,7 +160,9 @@ Every experiment reports these key metrics:
 | Metric | What It Measures | Target |
 |--------|-----------------|--------|
 | **Accuracy** | Overall classification correctness (UNKNOWN counted as incorrect) | >80% |
+| **Known Accuracy** | Accuracy over definitive (non-UNKNOWN) predictions only | >80% |
 | **F1 Score** | Balance of precision and recall (on known predictions only) | Higher is better |
+| **Coverage-Adjusted F1** | F1 × (1 − unknown_rate) — rewards both correctness and decisiveness | Higher is better |
 | **FP Rate** | Fraction of load cases wrongly classified as faults (UNKNOWN excluded) | Lower is better |
 | **Known FP Rate** | FP rate computed only over samples with a definitive prediction | Lower is better |
 | **Fault Recall** | Fraction of actual faults correctly identified | >90% |
@@ -171,6 +173,8 @@ Every experiment reports these key metrics:
 - **High fault recall + low FP rate** = the model correctly identifies faults while not raising false alarms on legitimate load events.
 - **FP reduction >40%** means CAAA reduces false positives by at least 40% compared to a classifier that ignores context — this is the central research claim.
 - **Known FP Rate vs FP Rate**: When the model defers many predictions as UNKNOWN, the overall FP rate can appear artificially low. Use `known_fp_rate` for a coverage-adjusted view that only counts definitive predictions.
+- **Known Accuracy vs Accuracy**: Similarly, `known_accuracy` excludes UNKNOWN predictions from the accuracy computation, giving a clearer picture of correctness on committed predictions.
+- **Coverage-Adjusted F1**: This composite metric (`f1 × (1 - unknown_rate)`) rewards models that are both correct and decisive. A model that classifies everything as UNKNOWN would score 0, while a perfect model with no UNKNOWN predictions would score 1.0.
 
 ---
 
@@ -199,7 +203,8 @@ The CAAA trainer includes several features for stable, reproducible training:
 - **ReduceLROnPlateau scheduler**: Automatically halves the learning rate when validation loss stops improving.
 - **Temperature calibration**: Post-hoc temperature scaling for calibrated confidence scores.
 - **StandardScaler**: Input features should be standardized before training. The entry points handle this automatically.
-- **Reproducible RNG**: All data generators use instance-level `np.random.default_rng(seed)` — multiple generators can coexist in the same process without corrupting each other's random state.
+- **Reproducible RNG**: All data generators use instance-level `np.random.default_rng(seed)` — multiple generators can coexist in the same process without corrupting each other's random state. Per-case seeds further ensure that generation order does not create statistical dependence between data splits.
+- **Unscaled tree-based baselines**: When the `--baseline` flag is used, tree-based models (RandomForest, XGBoost) are trained on unscaled features, consistent with their scale-invariant nature. Only neural models (CAAA) receive StandardScaler-transformed features.
 
 ### Command-Line Options for `train.py`
 
@@ -346,7 +351,7 @@ python scripts/ablation.py --data rcaeval --dataset RE1 --system online-boutique
 
 ## 9. Using the Anomaly Detector Pre-Stage
 
-CAAA has an optional Stage 1 — an LSTM autoencoder that filters normal windows before classification:
+CAAA has an optional Stage 1 — an LSTM autoencoder that filters normal windows before classification. The pre-filter checks **all services** in each case and takes the maximum anomaly score, so a fault in any service triggers detection:
 
 ```bash
 # Synthetic data with anomaly detector
@@ -509,6 +514,7 @@ python -m pytest tests/ -v --cov=src --cov-report=term-missing
 | `tests/test_integration.py` | End-to-end training and evaluation pipeline |
 | `tests/test_plan_modules.py` | Sklearn classifier wrappers |
 | `tests/test_rcaeval_pipeline.py` | RCAEval data loading and processing |
+| `tests/test_remaining_fixes.py` | Verification of code review fixes (vectorization, type hints, exports) |
 
 Run individual modules for faster feedback:
 
@@ -516,6 +522,7 @@ Run individual modules for faster feedback:
 python -m pytest tests/test_models.py -v        # ~10 seconds
 python -m pytest tests/test_features.py -v       # ~5 seconds
 python -m pytest tests/test_integration.py -v    # ~30 seconds
+python -m pytest tests/test_remaining_fixes.py -v # ~5 seconds
 ```
 
 ---
