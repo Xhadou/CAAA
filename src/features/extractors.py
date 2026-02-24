@@ -246,13 +246,18 @@ class FeatureExtractor:
                 cross_service_sync = 0.0
             else:
                 cpu_matrix = np.array([s[:min_len] for s in cpu_series])
-                # np.corrcoef returns the full correlation matrix
-                with np.errstate(invalid="ignore"):
-                    corr_matrix = np.corrcoef(cpu_matrix)
-                corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
-                # Extract upper triangle (excluding diagonal)
-                upper = corr_matrix[np.triu_indices(n, k=1)]
-                cross_service_sync = float(np.mean(upper)) if len(upper) > 0 else 0.0
+                # Filter out constant series (zero std) which produce NaN
+                # correlations — treat them as uncorrelated (0.0).
+                stds = np.std(cpu_matrix, axis=1)
+                non_const = stds > 0
+                if non_const.sum() < 2:
+                    cross_service_sync = 0.0
+                else:
+                    cpu_filtered = cpu_matrix[non_const]
+                    corr_matrix = np.corrcoef(cpu_filtered)
+                    n_filt = len(cpu_filtered)
+                    upper = corr_matrix[np.triu_indices(n_filt, k=1)]
+                    cross_service_sync = float(np.mean(upper)) if len(upper) > 0 else 0.0
 
         # 4. error_rate_delta
         deltas = []

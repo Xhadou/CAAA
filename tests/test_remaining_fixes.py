@@ -48,15 +48,16 @@ class TestCrossServiceSyncVectorized:
         """With a single service, cross_service_sync should be 0."""
         from src.data_loader.data_types import AnomalyCase, ServiceMetrics
 
+        rng = np.random.default_rng(42)
         df = pd.DataFrame({
             "timestamp": np.arange(60),
-            "cpu_usage": np.random.default_rng(42).uniform(10, 30, 60),
-            "memory_usage": np.random.default_rng(42).uniform(20, 40, 60),
-            "request_rate": np.random.default_rng(42).uniform(50, 200, 60),
-            "error_rate": np.random.default_rng(42).uniform(0.001, 0.01, 60),
-            "latency": np.random.default_rng(42).uniform(10, 100, 60),
-            "network_in": np.random.default_rng(42).uniform(1000, 5000, 60),
-            "network_out": np.random.default_rng(42).uniform(1000, 5000, 60),
+            "cpu_usage": rng.uniform(10, 30, 60),
+            "memory_usage": rng.uniform(20, 40, 60),
+            "request_rate": rng.uniform(50, 200, 60),
+            "error_rate": rng.uniform(0.001, 0.01, 60),
+            "latency": rng.uniform(10, 100, 60),
+            "network_in": rng.uniform(1000, 5000, 60),
+            "network_out": rng.uniform(1000, 5000, 60),
         })
         case = AnomalyCase(
             case_id="test_single",
@@ -142,8 +143,7 @@ class TestADPreFilterAllServices:
         assert "case.services[0]" not in content, (
             "train.py should not only check first service"
         )
-        assert "for svc in case.services" in content or \
-               "svc.metrics" in content, (
+        assert "for svc in case.services" in content, (
             "train.py should iterate over all services"
         )
 
