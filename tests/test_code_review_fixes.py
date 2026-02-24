@@ -11,7 +11,6 @@ These tests cover efficiency, design, and robustness improvements:
   8. Temperature clamped after calibration to avoid division-by-zero
 """
 
-import datetime
 import inspect
 
 import numpy as np

@@ -9,7 +9,7 @@ via the ``ruptures`` library, inspired by BARO (FSE 2024) which showed that
 Bayesian change point detection before RCA improves results by 58-189%.
 """
 
-import datetime
+from datetime import datetime as _datetime, timezone as _timezone
 import functools
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -464,8 +464,8 @@ class FeatureExtractor:
             if mean_ts < _SYNTHETIC_TS_THRESHOLD:
                 time_seasonality = 0.5
             else:
-                hour = datetime.datetime.fromtimestamp(
-                    mean_ts, tz=datetime.timezone.utc
+                hour = _datetime.fromtimestamp(
+                    mean_ts, tz=_timezone.utc
                 ).hour
                 if 9 <= hour <= 20:
                     time_seasonality = 0.7 + 0.3 * (hour - 9) / 11.0
