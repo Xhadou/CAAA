@@ -205,12 +205,12 @@ class AnomalyDetector:
     def compute_reconstruction_errors(self, data: np.ndarray) -> np.ndarray:
         """Compute per-window reconstruction error."""
         assert self.model is not None
-        if len(data) <= self.seq_length:
+        if len(data) < self.seq_length:
             return np.array([], dtype=np.float64)
         self.model.eval()
         errors: List[float] = []
         with torch.no_grad():
-            for i in range(len(data) - self.seq_length):
+            for i in range(len(data) - self.seq_length + 1):
                 seq = torch.FloatTensor(data[i: i + self.seq_length]).unsqueeze(0).to(self.device)
                 reconstruction, _ = self.model(seq)
                 errors.append(torch.mean((reconstruction - seq) ** 2).item())
