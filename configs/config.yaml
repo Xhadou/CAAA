@@ -17,7 +17,7 @@ features:
   window_size: 60
   stride: 10
   # Feature counts are defined in src/features/feature_schema.py
-  # n_workload: 6, n_behavioral: 6, n_context: 5, n_statistical: 13, n_service_level: 6
+  # n_workload: 6, n_behavioral: 6, n_context: 5, n_statistical: 13, n_service_level: 6, n_extended: 8
 
   workload_features:
     - global_load_ratio
@@ -55,7 +55,7 @@ model:
     calibration_split: 0.2
 
   caaa_model:
-    input_dim: 36
+    input_dim: 44
     hidden_dim: 64
     context_dim: 5
     n_classes: 2
@@ -81,7 +81,7 @@ training:
   learning_rate: 0.001
   early_stopping_patience: 10
   test_split: 0.2
-  val_split: 0.1
+  val_split: 0.2
 
 evaluation:
   metrics: ["accuracy", "precision", "recall", "f1", "confusion_matrix"]

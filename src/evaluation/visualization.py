@@ -118,7 +118,7 @@ def plot_feature_importance(
     Args:
         model: A fitted model with ``feature_importances_`` attribute
             or ``model`` attribute containing such.
-        feature_names: List of feature names (length 36).
+        feature_names: List of feature names (length N_FEATURES).
         save_path: Path to save the figure.
     """
     # Extract importances
@@ -364,7 +364,7 @@ def plot_shap_summary(
     Args:
         model: Fitted model with ``predict_proba`` method.
         X_test: Test features of shape (n_samples, n_features).
-        feature_names: List of feature names (length 36).
+        feature_names: List of feature names (length N_FEATURES).
         save_path: Path to save the figure.
         X_background: Background samples for KernelExplainer.
             Defaults to first 50 samples of X_test.
