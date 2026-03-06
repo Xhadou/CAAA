@@ -20,6 +20,7 @@ This guide walks you through setting up your environment, running experiments, a
 12. [Running Tests](#12-running-tests)
 13. [Troubleshooting](#13-troubleshooting)
 14. [Suggested Experiment Workflow](#14-suggested-experiment-workflow)
+15. [Extending CAAA](#15-extending-caaa)
 
 ---
 
@@ -126,7 +127,7 @@ python scripts/demo.py --n-fault 20 --n-load 20 --epochs 30
 
 **What this does:**
 1. Generates 20 synthetic fault cases and 20 expected-load cases
-2. Extracts 36-dimensional feature vectors from each case
+2. Extracts 44-dimensional feature vectors from each case
 3. Trains the CAAA neural model for 30 epochs
 4. Evaluates and prints classification metrics
 
@@ -234,7 +235,7 @@ See `configs/config.yaml` for all tunable parameters.
 
 ## 7. Running Ablation Studies
 
-The ablation study is the most important experiment — it systematically evaluates 12 model variants to answer the research questions.
+The ablation study is the most important experiment — it systematically evaluates 14 model variants to answer the research questions.
 
 ### Basic ablation
 
@@ -242,7 +243,7 @@ The ablation study is the most important experiment — it systematically evalua
 python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5
 ```
 
-This trains each of the 12 variants 5 times with different random seeds and reports mean ± standard deviation.
+This trains each of the 14 variants 5 times with different random seeds and reports mean ± standard deviation.
 
 ### With SHAP feature importance
 
@@ -289,7 +290,7 @@ python scripts/ablation.py \
 
 ### Ablation Variants
 
-The ablation evaluates these 12 variants:
+The ablation evaluates these 14 variants:
 
 | # | Variant | What It Tests |
 |---|---------|--------------|
@@ -303,8 +304,10 @@ The ablation evaluates these 12 variants:
 | 8 | Stat + Service-Level | Uses statistical + service-level features |
 | 9 | Baseline RF | Random Forest on all features |
 | 10 | XGBoost | XGBoost on all features |
-| 11 | Rule-Based | Hand-crafted heuristic rules |
-| 12 | Naive | No-context baseline (always predicts FAULT) |
+| 11 | LightGBM | LightGBM on all features |
+| 12 | CatBoost | CatBoost on all features |
+| 13 | Rule-Based | Hand-crafted heuristic rules |
+| 14 | Naive | No-context baseline (always predicts FAULT) |
 
 ---
 
@@ -388,7 +391,7 @@ data:
 ```yaml
 model:
   caaa_model:
-    input_dim: 36         # Feature vector size (don't change unless modifying features)
+    input_dim: 44         # Feature vector size (don't change unless modifying features)
     hidden_dim: 64        # Hidden layer size (try 32 or 128)
     context_dim: 5        # Context features count
     dropout: 0.1          # Dropout rate (try 0.2 for more regularization)
@@ -509,7 +512,7 @@ python -m pytest tests/ -v --cov=src --cov-report=term-missing
 | Test File | What It Tests |
 |-----------|--------------|
 | `tests/test_data_loader.py` | Synthetic data generation, fault injection |
-| `tests/test_features.py` | Feature extraction, 36-dim schema validation |
+| `tests/test_features.py` | Feature extraction, 44-dim schema validation |
 | `tests/test_models.py` | CAAA model, context module, feature encoder |
 | `tests/test_integration.py` | End-to-end training and evaluation pipeline |
 | `tests/test_plan_modules.py` | Sklearn classifier wrappers |
@@ -534,7 +537,7 @@ python -m pytest tests/test_review_fixes.py -v   # ~5 seconds
 PyTorch was not installed. Run:
 
 ```bash
-pip install torch>=2.0.0
+pip install torch>=2.6.0
 ```
 
 If you need a specific PyTorch build (CPU-only, CUDA version), see [pytorch.org/get-started](https://pytorch.org/get-started/locally/).
@@ -672,6 +675,30 @@ python scripts/ablation.py \
 python -m src.main --data rcaeval --dataset RE1 --system online-boutique \
     --model caaa --anomaly-detector --ad-epochs 50
 ```
+
+---
+
+## 15. Extending CAAA
+
+### Adding a new feature
+
+1. Add the feature name to `src/features/feature_schema.py` (in the appropriate group)
+2. Implement extraction in `src/features/extractors.py`
+3. Update `N_FEATURES` and `ALL_FEATURE_NAMES` in the schema
+4. Update `input_dim` in `configs/config.yaml`
+5. Update tests with the new feature count
+
+### Adding a new baseline
+
+1. Add a class to `src/models/baseline.py` following the existing pattern (lazy import, `fit`/`predict`/`predict_proba` interface)
+2. Export it in `src/models/__init__.py`
+3. Add a runner function in `scripts/ablation.py`
+
+### Adding a new fault type
+
+1. Add a method to `src/data_loader/fault_generator.py`
+2. Register it in the `FAULT_TYPES` list
+3. Add test coverage in `tests/test_data_loader.py`
 
 ---
 
