@@ -8,7 +8,7 @@ shap>=0.42.0
 ruptures>=1.1.0
 
 # Deep Learning
-torch>=2.0.0
+torch>=2.6.0
 
 # Visualization
 matplotlib>=3.7.0
@@ -27,3 +27,8 @@ pyyaml>=6.0
 # Testing
 pytest>=7.4.0
 pytest-cov>=4.1.0
+
+# Best-in-class baselines
+lightgbm>=4.0.0
+catboost>=1.2
+tabpfn>=2.0

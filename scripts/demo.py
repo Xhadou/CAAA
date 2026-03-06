@@ -20,6 +20,7 @@ from src.features import FeatureExtractor
 from src.models import CAAAModel, NaiveBaseline
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import compute_all_metrics, compute_false_positive_rate
+from src.utils import set_seed, resolve_device
 
 
 def main():
@@ -35,6 +36,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--config", type=str, default=None, help="Path to config YAML file")
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"],
+                        help="Device for training (default: auto)")
     args = parser.parse_args()
 
     # Load config if provided
@@ -45,8 +48,7 @@ def main():
         if args.epochs == 30:
             args.epochs = training_cfg.get("epochs", args.epochs)
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    set_seed(args.seed)
 
     print("=" * 50)
     print("CAAA DEMO - Context-Aware Anomaly Attribution")
@@ -67,9 +69,13 @@ def main():
     X = extractor.extract_batch(all_cases).astype(np.float32)
     print(f"  Feature matrix: {X.shape}")
 
-    # Split
-    X_train, X_test, y_train, y_test = train_test_split(
+    # Split (3-way: train/val/test to prevent data leakage)
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, labels, test_size=0.2, random_state=args.seed, stratify=labels
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=0.25, random_state=args.seed,
+        stratify=y_trainval,
     )
 
     # Further split training data for validation (avoids data leakage).
@@ -87,7 +93,7 @@ def main():
 
     # Train CAAA model
     print("Training CAAA model...")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = resolve_device(args.device)
     model = CAAAModel(input_dim=X_train.shape[1])
     trainer = CAAATrainer(model, learning_rate=0.001, device=device)
     trainer.train(

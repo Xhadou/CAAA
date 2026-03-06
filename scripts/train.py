@@ -25,6 +25,7 @@ from src.evaluation.metrics import (
     print_evaluation_summary,
 )
 from src.features.feature_schema import N_FEATURES
+from src.utils import set_seed, resolve_device
 
 
 def main():
@@ -69,6 +70,9 @@ def main():
                         help="Anomaly detector training epochs")
     parser.add_argument("--ad-threshold", type=float, default=95,
                         help="Anomaly detector threshold percentile")
+    parser.add_argument("--device", type=str, default="auto",
+                        choices=["auto", "cpu", "cuda"],
+                        help="Device for training (auto detects CUDA)")
 
     args = parser.parse_args()
 
@@ -88,8 +92,8 @@ def main():
         if args.systems == ["online-boutique"]:
             args.systems = data_cfg.get("systems", args.systems)
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    set_seed(args.seed)
+    device = resolve_device(args.device if hasattr(args, 'device') else "auto")
 
     print("=" * 50)
     print("CAAA TRAINING")
@@ -143,9 +147,13 @@ def main():
     X = extractor.extract_batch(all_cases).astype(np.float32)
     print(f"Features: {X.shape}")
 
-    # Split
-    X_train, X_test, y_train, y_test = train_test_split(
+    # Split (3-way: train/val/test to prevent data leakage)
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, labels, test_size=0.2, random_state=args.seed, stratify=labels,
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=0.25, random_state=args.seed,
+        stratify=y_trainval,
     )
 
     # Further split training data for calibration (avoids data leakage)
@@ -159,16 +167,16 @@ def main():
     # Scale features (fit on train only) for neural models
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
+    X_val = scaler.transform(X_val)
     X_cal = scaler.transform(X_cal)
     X_test = scaler.transform(X_test)
 
     # Train CAAA model
     print(f"Training CAAA model for {args.epochs} epochs...")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = CAAAModel(input_dim=N_FEATURES)
     trainer = CAAATrainer(model, learning_rate=args.lr, device=device)
     trainer.train(
-        X_train, y_train, X_val=X_cal, y_val=y_cal,
+        X_train, y_train, X_val=X_val, y_val=y_val,
         epochs=args.epochs, batch_size=args.batch_size,
         early_stopping_patience=10,
     )

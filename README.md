@@ -58,8 +58,8 @@ CAAA uses an optional two-stage pipeline:
  Metrics ──► [Stage 1] ──►  ┌───────────┐  ┌───────────┐  ┌──────────┐  │
  (optional   Anomaly      │ │  Feature  │─►│ Context   │─►│ Classif. │──► FAULT / EXPECTED_LOAD / UNKNOWN
   LSTM-AE)   Detection    │ │  Encoder  │  │ Module    │  │   Head   │  │
-                          │ │  (MLP)    │  │(Attn+Gate)│  │          │  │
-                          │ │ 36d → 64d │  │ 5 context │  │ 2-class  │  │
+                          │ │(MLP+LN)  │  │(FiLM+Gate)│  │  (GELU)  │  │
+                          │ │ 44d → 64d │  │ 5 context │  │ 2-class  │  │
                           └─────────────────────────────────────────────┘
 ```
 
@@ -73,13 +73,13 @@ The core CAAA model classifies detected anomalies:
 
 | Component | Description |
 |-----------|-------------|
-| **Feature Encoder** | 2-layer MLP projecting 36-dim feature vectors into 64-dim hidden representations |
-| **Context Integration Module** | Attention mechanism over 5 context features with learned confidence gating to modulate context influence |
+| **Feature Encoder** | 2-layer MLP with LayerNorm and GELU, projecting 44-dim feature vectors into 64-dim representations |
+| **Context Integration Module** | FiLM (Feature-wise Linear Modulation) conditioning with enriched confidence gating (3-feature gate) |
 | **Classification Head** | 2-class output (FAULT vs EXPECTED_LOAD) with post-hoc UNKNOWN assignment via confidence thresholding |
 
 #### Dual Context Processing
 
-The full 36-dim feature vector (including context dims 12–16) is passed through the Feature Encoder so that the encoder can learn joint representations capturing interactions between context and metric features. Context features are *also* sliced out separately and fed into the Context Integration Module for explicit attention and confidence gating. This dual processing is intentional: the encoder builds a context-entangled hidden representation, while the gating module controls how much the explicit context signal modulates the final prediction.
+The full 44-dim feature vector (including context dims 12–16) is passed through the Feature Encoder so that the encoder can learn joint representations capturing interactions between context and metric features. Context features are *also* sliced out separately and fed into the Context Integration Module for explicit attention and confidence gating. This dual processing is intentional: the encoder builds a context-entangled hidden representation, while the gating module controls how much the explicit context signal modulates the final prediction.
 
 #### Confidence Gate Initialization
 
@@ -89,15 +89,21 @@ The confidence gate in the Context Integration Module is initialized with `bias=
 
 The novel loss function combines three terms:
 
-- **Cross-entropy classification loss** — standard supervised signal
-- **Context consistency penalty** — penalizes predictions that contradict available context signals (e.g., classifying as FAULT when a scheduled load event is active)
+- **Cross-entropy classification loss** (with label smoothing 0.1)
+- **Context consistency penalty** — penalizes predictions that contradict available context signals, weighted by confidence² for softer penalty on ambiguous cases
 - **Confidence calibration loss** — entropy regularization guided by context confidence scores
 
 **Penalty scale behavior:** When `event_active ≈ 0.5` and model probabilities are also ≈ 0.5, the per-sample consistency penalty approaches 1.0. With the default `alpha=0.3`, this contributes up to 0.3 to the total loss — comparable to the classification cross-entropy on well-separated data. The penalty therefore dominates early in training when the model is uncertain, and naturally diminishes as predictions become more confident.
 
+**Training methodology:**
+- 3-way stratified split (60% train / 20% val / 20% test) — validation for early stopping and calibration, test for final metrics only
+- AdamW optimizer with ReduceLROnPlateau scheduler and gradient clipping (max_norm=1.0)
+- StandardScaler normalization for neural models (tree baselines use raw features)
+- GPU auto-detection (`--device auto|cpu|cuda`)
+
 ## Feature Vector
 
-The system extracts a 36-dimensional feature vector organized into 5 groups, defined centrally in `src/features/feature_schema.py`:
+The system extracts a 44-dimensional feature vector organized into 6 groups, defined centrally in `src/features/feature_schema.py`:
 
 | Group | Dims | Features | Purpose |
 |-------|------|----------|---------|
@@ -106,6 +112,7 @@ The system extracts a 36-dimensional feature vector organized into 5 groups, def
 | **Context** | 12–16 | `event_active`, `event_expected_impact`, `time_seasonality`, `recent_deployment`, `context_confidence` | External context signals (the key innovation). `time_seasonality` returns a neutral 0.5 for synthetic data (sequential integer timestamps) and only activates on real-world epoch-based timestamps. |
 | **Statistical** | 17–29 | Mean/std of CPU, memory, requests, errors, latency, network; `max_error_rate` | Standard metric statistics |
 | **Service-Level** | 30–35 | `n_services`, `max_cpu_service_ratio`, `max_error_service_ratio`, `cpu_spread`, `error_spread`, `latency_spread` | Cross-service aggregation patterns |
+| **Extended** | 36–43 | `spectral_entropy`, `high_freq_energy_ratio`, `dominant_frequency`, `network_asymmetry`, `graph_anomaly_centrality`, `anomaly_spread`, `max_cpu_derivative`, `error_rate_slope` | Frequency-domain, graph-structural, and rate-of-change features |
 
 ## Data Sources
 
@@ -159,7 +166,7 @@ pip install -r requirements.txt
 pip install -e ".[test]"
 ```
 
-**Requirements:** Python 3.9+, PyTorch 2.0+, scikit-learn 1.3+, NumPy, Pandas, SciPy, XGBoost, SHAP, ruptures, Matplotlib, Seaborn, PyYAML.
+**Requirements:** Python 3.9+, PyTorch 2.6+, scikit-learn 1.3+, NumPy, Pandas, SciPy, XGBoost, LightGBM, CatBoost, SHAP, ruptures, Matplotlib, Seaborn, PyYAML.
 
 Verify the installation:
 
@@ -205,7 +212,7 @@ python -m src.main --n-fault 50 --n-load 50 --model rule_based
 
 ### Ablation Study
 
-The ablation script evaluates 12 model variants systematically to answer the research questions:
+The ablation script evaluates 14 model variants systematically to answer the research questions:
 
 ```bash
 # Standard ablation (5 runs per variant)
@@ -238,8 +245,10 @@ python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5 --inc
 | 8 | Stat + Service-Level | Combined traditional features |
 | 9 | Baseline RF | Random Forest baseline |
 | 10 | XGBoost | XGBoost baseline |
-| 11 | Rule-Based | Heuristic rules |
-| 12 | Naive | No-context naive classifier |
+| 11 | LightGBM | LightGBM baseline |
+| 12 | CatBoost | CatBoost baseline |
+| 13 | Rule-Based | Heuristic rules |
+| 14 | Naive | No-context naive classifier |
 
 ### Using RCAEval Real-World Data
 
@@ -349,7 +358,7 @@ CAAA/
 │   │   ├── rcaeval_loader.py       # RCAEval dataset parser
 │   │   └── utils.py               # Shared base metrics generation utilities
 │   ├── features/
-│   │   ├── feature_schema.py       # Single source of truth for 36-dim layout
+│   │   ├── feature_schema.py       # Single source of truth for 44-dim layout
 │   │   ├── extractors.py           # Feature extraction from raw metrics
 │   │   └── context_features.py     # ContextFeatures dataclass (container only)
 │   ├── models/
@@ -358,7 +367,7 @@ CAAA/
 │   │   ├── context_module.py       # Context integration with attention & gating
 │   │   ├── anomaly_detector.py     # LSTM autoencoder for pre-stage detection
 │   │   ├── classifier.py          # Multi-backend sklearn classifier
-│   │   └── baseline.py            # RandomForest, XGBoost, rule-based baselines
+│   │   └── baseline.py            # RF, XGBoost, LightGBM, CatBoost, TabPFN baselines
 │   ├── training/
 │   │   ├── losses.py              # Context Consistency Loss (novel)
 │   │   └── trainer.py             # PyTorch training harness with early stopping
@@ -390,7 +399,7 @@ All model and training parameters are configurable via `configs/config.yaml`. Ke
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `model.caaa_model.input_dim` | 36 | Feature vector dimensionality |
+| `model.caaa_model.input_dim` | 44 | Feature vector dimensionality |
 | `model.caaa_model.hidden_dim` | 64 | Hidden layer size |
 | `model.caaa_model.context_dim` | 5 | Number of context features |
 | `model.caaa_model.n_classes` | 2 | Output classes (FAULT, EXPECTED_LOAD) |
@@ -405,7 +414,7 @@ All model and training parameters are configurable via `configs/config.yaml`. Ke
 | `training.learning_rate` | 0.001 | Adam optimizer learning rate |
 | `training.early_stopping_patience` | 10 | Epochs to wait before early stopping |
 | `training.test_split` | 0.2 | Fraction of data reserved for testing |
-| `training.val_split` | 0.1 | Fraction of training data for validation |
+| `training.val_split` | 0.2 | Fraction of training data for validation |
 
 ### Training Features
 
@@ -476,6 +485,13 @@ This project builds on and addresses gaps identified in the following research a
 - **LLM for AIOps**: RCACopilot (EuroSys 2024), RCAgent (CIKM 2024)
 
 **Key gap addressed**: No prior work dynamically adjusts anomaly classification based on workload context (time-of-day patterns, known events, deployment changes). CAAA is the first to integrate these signals into a unified attribution framework.
+
+## Known Limitations
+
+- **No GNN component**: The architecture uses feature-level graph information (service adjacency, anomaly centrality) but does not include a full Graph Neural Network for structural reasoning over the service topology.
+- **Synthetic data caveats**: While the synthetic data generator produces realistic fault patterns (AR(1) autocorrelation, per-service baselines, load jitter), it cannot capture all real-world failure modes. RCAEval benchmark evaluation helps validate on real traces.
+- **Small dataset regime**: With typical dataset sizes <10K samples, deep learning baselines may not reach their full potential. TabPFN is included as a foundation model baseline designed for this regime.
+- **Binary classification**: The model classifies as FAULT vs EXPECTED_LOAD (with post-hoc UNKNOWN). Multi-class fault type classification is out of scope.
 
 ## Citation
 

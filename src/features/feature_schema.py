@@ -4,13 +4,14 @@ All feature indices, names, and group boundaries are defined here.
 Every module that needs to know about feature positions imports from this
 module rather than using hardcoded integers.
 
-Feature vector layout (36 features total)::
+Feature vector layout (44 features total)::
 
     [0:6]   Workload features
     [6:12]  Behavioral features
     [12:17] Context features
     [17:30] Statistical features
     [30:36] Service-level features
+    [36:44] Extended features
 
 Usage::
 
@@ -48,11 +49,10 @@ CONTEXT_NAMES: List[str] = [
     "context_confidence",
 ]
 
-# network_out is intentionally excluded to keep N_FEATURES=36.  Adding it
+# network_out is intentionally excluded from statistical features.  Adding it
 # would change the statistical group from 13 to 15 features (mean + std +
-# max_error_rate), requiring updates to input_dim=36 across the model,
-# trainer, ablation script, and config.  network_in alone captures the
-# dominant network traffic signal for anomaly attribution.
+# max_error_rate).  network_in alone captures the dominant network traffic
+# signal for anomaly attribution.
 STAT_METRIC_COLS: List[str] = [
     "cpu_usage",
     "memory_usage",
@@ -77,6 +77,17 @@ SERVICE_LEVEL_NAMES: List[str] = [
     "latency_spread",
 ]
 
+EXTENDED_NAMES: List[str] = [
+    "spectral_entropy",
+    "high_freq_energy_ratio",
+    "dominant_frequency",
+    "network_asymmetry",
+    "graph_anomaly_centrality",
+    "anomaly_spread",
+    "max_cpu_derivative",
+    "error_rate_slope",
+]
+
 # ── Derived constants ─────────────────────────────────────────────────
 
 N_WORKLOAD: int = len(WORKLOAD_NAMES)          # 6
@@ -84,11 +95,13 @@ N_BEHAVIORAL: int = len(BEHAVIORAL_NAMES)      # 6
 N_CONTEXT: int = len(CONTEXT_NAMES)            # 5
 N_STATISTICAL: int = len(STATISTICAL_NAMES)    # 13
 N_SERVICE_LEVEL: int = len(SERVICE_LEVEL_NAMES)  # 6
+N_EXTENDED: int = len(EXTENDED_NAMES)          # 8
 
 N_FEATURES: int = (
     N_WORKLOAD + N_BEHAVIORAL + N_CONTEXT + N_STATISTICAL + N_SERVICE_LEVEL
+    + N_EXTENDED
 )
-assert N_FEATURES == 36, f"Feature count mismatch: expected 36, got {N_FEATURES}"
+assert N_FEATURES == 44, f"Feature count mismatch: expected 44, got {N_FEATURES}"
 
 # ── Index ranges (start, end) — use as x[:, start:end] ───────────────
 
@@ -109,6 +122,10 @@ SERVICE_LEVEL_RANGE: Tuple[int, int] = (
     STATISTICAL_RANGE[1],
     STATISTICAL_RANGE[1] + N_SERVICE_LEVEL,
 )
+EXTENDED_RANGE: Tuple[int, int] = (
+    SERVICE_LEVEL_RANGE[1],
+    SERVICE_LEVEL_RANGE[1] + N_EXTENDED,
+)
 
 # Convenience aliases used across the codebase
 CONTEXT_START: int = CONTEXT_RANGE[0]  # 12
@@ -122,6 +139,7 @@ ALL_FEATURE_NAMES: List[str] = (
     + CONTEXT_NAMES
     + STATISTICAL_NAMES
     + SERVICE_LEVEL_NAMES
+    + EXTENDED_NAMES
 )
 assert len(ALL_FEATURE_NAMES) == N_FEATURES
 
@@ -133,6 +151,7 @@ FEATURE_GROUPS: Dict[str, List[int]] = {
     "context": list(range(*CONTEXT_RANGE)),
     "statistical": list(range(*STATISTICAL_RANGE)),
     "service-level": list(range(*SERVICE_LEVEL_RANGE)),
+    "extended": list(range(*EXTENDED_RANGE)),
 }
 
 # ── Feature group color mapping (for visualization) ──────────────────
@@ -143,4 +162,5 @@ FEATURE_GROUP_COLORS: Dict[str, str] = {
     "context": "#2ecc71",
     "statistical": "#f39c12",
     "service-level": "#9b59b6",
+    "extended": "#1abc9c",
 }

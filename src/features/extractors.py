@@ -1,8 +1,8 @@
 """Feature extraction for anomaly cases.
 
-Extracts a fixed-size feature vector (36 features) from an AnomalyCase,
-organized into workload, behavioral, context, statistical, and service-level
-feature groups.
+Extracts a fixed-size feature vector (44 features) from an AnomalyCase,
+organized into workload, behavioral, context, statistical, service-level,
+and extended feature groups.
 
 The ``onset_gradient`` feature uses PELT change point detection (Killick 2012)
 via the ``ruptures`` library, inspired by BARO (FSE 2024) which showed that
@@ -34,6 +34,7 @@ from src.features.feature_schema import (
     STAT_METRIC_COLS as _STAT_METRIC_COLS,
     STATISTICAL_NAMES as _STATISTICAL_NAMES,
     SERVICE_LEVEL_NAMES as _SERVICE_LEVEL_NAMES,
+    EXTENDED_NAMES as _EXTENDED_NAMES,
     N_FEATURES,
 )
 
@@ -133,7 +134,7 @@ def _detect_change_point(
 
 
 class FeatureExtractor:
-    """Extracts a 36-dimensional feature vector from an ``AnomalyCase``.
+    """Extracts a 44-dimensional feature vector from an ``AnomalyCase``.
 
     Feature groups:
         - Workload features (6)
@@ -141,6 +142,7 @@ class FeatureExtractor:
         - Context features (5)
         - Statistical features (13)
         - Service-level features (6)
+        - Extended features (8)
 
     Args:
         seed: Random seed for reproducible noise injection in context
@@ -155,8 +157,12 @@ class FeatureExtractor:
             + _CONTEXT_NAMES
             + _STATISTICAL_NAMES
             + _SERVICE_LEVEL_NAMES
+            + _EXTENDED_NAMES
         )
-        assert len(self._names) == N_FEATURES
+        if len(self._names) != N_FEATURES:
+            raise RuntimeError(
+                f"Feature name count {len(self._names)} != N_FEATURES {N_FEATURES}"
+            )
         self._seed = seed
         self._case_counter = 0
 
@@ -171,7 +177,7 @@ class FeatureExtractor:
             case: An ``AnomalyCase`` instance.
 
         Returns:
-            A 1-D numpy array of shape ``(36,)``.
+            A 1-D numpy array of shape ``(44,)``.
         """
         # Derive a per-case RNG so that extraction order does not affect
         # results.  The seed is based on case_id when available, otherwise
@@ -189,8 +195,10 @@ class FeatureExtractor:
             self._context_features(case.context, case.services, rng=case_rng),
             self._statistical_features(case.services),
             self._service_level_features(case.services),
+            self._extended_features(case),
         ])
-        assert feats.shape == (N_FEATURES,), f"Expected {N_FEATURES}, got {feats.shape}"
+        if feats.shape != (N_FEATURES,):
+            raise RuntimeError(f"Expected {N_FEATURES} features, got {feats.shape}")
         return feats
 
     def extract_batch(self, cases: List[AnomalyCase]) -> np.ndarray:
@@ -200,7 +208,7 @@ class FeatureExtractor:
             cases: List of ``AnomalyCase`` instances.
 
         Returns:
-            A 2-D numpy array of shape ``(len(cases), 36)``.
+            A 2-D numpy array of shape ``(len(cases), 44)``.
         """
         out = np.empty((len(cases), N_FEATURES), dtype=np.float64)
         for i, c in enumerate(cases):
@@ -208,7 +216,7 @@ class FeatureExtractor:
         return out
 
     def feature_names(self) -> List[str]:
-        """Return ordered list of 36 feature names."""
+        """Return ordered list of 44 feature names."""
         return list(self._names)
 
     # ------------------------------------------------------------------
@@ -425,6 +433,10 @@ class FeatureExtractor:
             - ``event_expected_impact``: Gaussian noise (std=0.05)
             - ``recent_deployment``: sampled from a base rate of 0.15
               for all cases, independent of the label
+
+        Args:
+            rng: Optional seeded Generator for deterministic noise.
+                 Falls back to a new default_rng if not provided.
         """
         ctx = context or {}
         if rng is None:
@@ -551,4 +563,113 @@ class FeatureExtractor:
             cpu_spread,
             error_spread,
             latency_spread,
+        ])
+
+    # ------------------------------------------------------------------
+    # Extended features (8)
+    # ------------------------------------------------------------------
+
+    def _extended_features(self, case: AnomalyCase) -> np.ndarray:
+        """Extract 8 extended features: frequency-domain, network, graph, rate-of-change."""
+        services = case.services
+        n = len(services)
+        if n == 0:
+            return np.zeros(8)
+
+        # 1-3: Frequency-domain features (spectral_entropy, high_freq_energy_ratio, dominant_frequency)
+        from scipy.signal import welch
+
+        entropies, hf_ratios, dom_freqs = [], [], []
+        for svc in services:
+            cpu = svc.metrics["cpu_usage"].values
+            if len(cpu) < 8:
+                entropies.append(0.0)
+                hf_ratios.append(0.0)
+                dom_freqs.append(0.0)
+                continue
+            freqs, psd = welch(cpu, nperseg=min(len(cpu), 256))
+            # Spectral entropy
+            psd_norm = psd / (psd.sum() + 1e-10)
+            entropy = -np.sum(psd_norm * np.log2(psd_norm + 1e-10))
+            entropies.append(float(entropy))
+            # High frequency energy ratio (above Nyquist/2)
+            nyquist_half = len(freqs) // 2
+            hf_energy = psd[nyquist_half:].sum()
+            total_energy = psd.sum() + 1e-10
+            hf_ratios.append(float(hf_energy / total_energy))
+            # Dominant frequency
+            dom_freqs.append(float(freqs[np.argmax(psd)]))
+
+        spectral_entropy = float(np.mean(entropies))
+        high_freq_energy_ratio = float(np.mean(hf_ratios))
+        dominant_frequency = float(np.mean(dom_freqs))
+
+        # 4: Network asymmetry
+        asymmetries = []
+        for svc in services:
+            net_in = svc.metrics["network_in"].values
+            net_out = svc.metrics["network_out"].values
+            eps = 1e-10
+            asym = np.mean(np.abs(net_in - net_out) / (net_in + net_out + eps))
+            asymmetries.append(float(asym))
+        network_asymmetry = float(np.mean(asymmetries))
+
+        # 5-6: Graph structural features
+        from src.data_loader.dataset import _SERVICE_ADJACENCY
+
+        svc_map = {s.service_name: s for s in services}
+
+        # graph_anomaly_centrality: degree-weighted anomaly score
+        centrality_scores = []
+        for svc in services:
+            cpu = svc.metrics["cpu_usage"].values
+            z_score = (cpu - np.mean(cpu)) / (np.std(cpu) + 1e-10)
+            is_anomalous = float(np.any(z_score > 2.0))
+            degree = len(_SERVICE_ADJACENCY.get(svc.service_name, []))
+            centrality_scores.append(is_anomalous * degree)
+        graph_anomaly_centrality = float(np.mean(centrality_scores)) if centrality_scores else 0.0
+
+        # anomaly_spread: std of pairwise correlations between anomalous neighbors
+        anomalous_corrs = []
+        for svc in services:
+            cpu = svc.metrics["cpu_usage"].values
+            z = (cpu - np.mean(cpu)) / (np.std(cpu) + 1e-10)
+            if not np.any(z > 2.0):
+                continue
+            neighbors = _SERVICE_ADJACENCY.get(svc.service_name, [])
+            for nb_name in neighbors:
+                if nb_name in svc_map:
+                    nb_cpu = svc_map[nb_name].metrics["cpu_usage"].values
+                    min_len = min(len(cpu), len(nb_cpu))
+                    if min_len > 1:
+                        anomalous_corrs.append(_safe_pearsonr(cpu[:min_len], nb_cpu[:min_len]))
+        anomaly_spread = float(np.std(anomalous_corrs)) if len(anomalous_corrs) > 1 else 0.0
+
+        # 7: max_cpu_derivative
+        max_derivs = []
+        for svc in services:
+            cpu = svc.metrics["cpu_usage"].values
+            if len(cpu) < 2:
+                max_derivs.append(0.0)
+                continue
+            deriv = np.diff(cpu)
+            max_derivs.append(float(np.max(np.abs(deriv))))
+        max_cpu_derivative = float(np.max(max_derivs)) if max_derivs else 0.0
+
+        # 8: error_rate_slope
+        slopes = []
+        for svc in services:
+            err = svc.metrics["error_rate"].values
+            slopes.append(_linear_slope(err))
+        error_rate_slope = float(np.mean(slopes))
+
+        return np.array([
+            spectral_entropy,
+            high_freq_energy_ratio,
+            dominant_frequency,
+            network_asymmetry,
+            graph_anomaly_centrality,
+            anomaly_spread,
+            max_cpu_derivative,
+            error_rate_slope,
         ])

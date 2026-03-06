@@ -62,9 +62,9 @@ def generate_combined_dataset(
         fault_context = {}
         if rng.random() < 0.3:
             fault_context["recent_deployment"] = True
-        # 10% of fault cases get a fake context with event_type to prevent
+        # 30% of fault cases get a fake context with event_type to prevent
         # event_active from being a perfect proxy for the label.
-        if rng.random() < 0.10:
+        if rng.random() < 0.30:
             fake_event = str(rng.choice([
                 "flash_sale", "marketing_campaign", "scheduled_batch",
             ]))
@@ -93,9 +93,9 @@ def generate_combined_dataset(
         services, context = load_gen.generate_load_spike_metrics(
             system=system, case_seed=case_seed,
         )
-        # 15% of load cases get empty context (simulating unscheduled load
+        # 30% of load cases get empty context (simulating unscheduled load
         # spikes with no calendar entry) to prevent label leakage.
-        if rng.random() < 0.15:
+        if rng.random() < 0.30:
             context = {}
         load_cases.append(
             AnomalyCase(

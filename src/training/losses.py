@@ -10,6 +10,27 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 
+class FocalLoss(nn.Module):
+    """Focal loss for handling class imbalance.
+
+    Reduces the loss contribution from easy examples, focusing
+    training on hard misclassified examples.
+
+    Reference: Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017
+    """
+
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0) -> None:
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        ce_loss = F.cross_entropy(logits, labels, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return focal_loss.mean()
+
+
 class ContextConsistencyLoss(nn.Module):
     """Custom loss combining classification, context consistency, and calibration.
 
@@ -48,7 +69,7 @@ class ContextConsistencyLoss(nn.Module):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
-        self.ce_loss = nn.CrossEntropyLoss()
+        self.ce_loss = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def forward(
         self,
@@ -85,11 +106,12 @@ class ContextConsistencyLoss(nn.Module):
         load_prob = probs[:, 1]
         penalty_when_no_event = (1.0 - event_active) * load_prob
 
-        # Weight by context_confidence so that corrupted/unreliable context
-        # (10% of faults with fake events, 15% of loads without events)
-        # contributes little to the penalty.
+        # Weight by context_confidence squared so that corrupted/unreliable
+        # context (30% of faults with fake events, 30% of loads without
+        # events) contributes very little to the penalty.  Squaring makes
+        # the penalty softer for ambiguous cases (confidence ~0.3-0.5).
         per_sample_penalty = penalty_when_event + penalty_when_no_event
-        consistency_loss = torch.mean(context_confidence * per_sample_penalty)
+        consistency_loss = torch.mean(context_confidence ** 2 * per_sample_penalty)
 
         # 3. Confidence calibration loss
         # When context_confidence is high, penalize high entropy (uncertainty)
@@ -141,7 +163,7 @@ class SupConContextLoss(nn.Module):
         self.base_temperature = base_temperature
         self.context_weight = context_weight
         self.cls_weight = cls_weight
-        self.ce_loss = nn.CrossEntropyLoss()
+        self.ce_loss = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def forward(
         self,

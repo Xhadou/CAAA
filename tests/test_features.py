@@ -31,7 +31,7 @@ class TestFeatureExtractorSingle:
         fault_cases, _ = dataset
         feats = extractor.extract(fault_cases[0])
         assert feats.shape == (N_FEATURES,)
-        assert feats.shape == (36,)
+        assert feats.shape == (44,)
 
     def test_features_are_finite(self, extractor, dataset):
         fault_cases, load_cases = dataset
@@ -56,7 +56,7 @@ class TestFeatureNames:
     def test_feature_names(self, extractor):
         names = extractor.feature_names()
         assert len(names) == N_FEATURES
-        assert len(names) == 36
+        assert len(names) == 44
         assert all(isinstance(n, str) for n in names)
         # Spot check some known names
         assert "global_load_ratio" in names
@@ -78,14 +78,14 @@ class TestFaultVsLoad:
         err_idx = names.index("error_rate_delta")
         assert np.mean(fault_feats[:, err_idx]) > np.mean(load_feats[:, err_idx])
 
-        # event_active: majority (>80%) of load cases should have event_active > 0.5
-        # and majority (>80%) of fault cases should have event_active < 0.5
-        # (no longer universally 1.0 / 0.0 due to label-leakage prevention)
+        # event_active: majority of load cases should have event_active > 0.5
+        # and majority of fault cases should have event_active < 0.5
+        # Thresholds lowered to 60% due to 30% noise injection for label-leakage prevention
         event_idx = names.index("event_active")
         load_active_frac = np.mean(load_feats[:, event_idx] > 0.5)
         fault_inactive_frac = np.mean(fault_feats[:, event_idx] < 0.5)
-        assert load_active_frac >= 0.80
-        assert fault_inactive_frac >= 0.80
+        assert load_active_frac >= 0.60
+        assert fault_inactive_frac >= 0.60
 
 
 # ── Context features ─────────────────────────────────────────────────
@@ -97,28 +97,28 @@ class TestContextFeatures:
         event_idx = names.index("event_active")
         conf_idx = names.index("context_confidence")
 
-        # Majority (>80%) of load cases should have event_active == 1.0
-        # (some may have empty context due to label-leakage prevention)
+        # Majority (>60%) of load cases should have event_active == 1.0
+        # (30% may have empty context due to label-leakage prevention)
         active_count = 0
         for case in load_cases:
             feats = extractor.extract(case)
             if feats[event_idx] == 1.0:
                 active_count += 1
-        assert active_count / len(load_cases) >= 0.80
+        assert active_count / len(load_cases) >= 0.60
 
     def test_context_features_for_fault(self, extractor, dataset):
         fault_cases, _ = dataset
         names = extractor.feature_names()
         event_idx = names.index("event_active")
 
-        # Majority (>80%) of fault cases should have event_active == 0.0
-        # (some may have fake context due to label-leakage prevention)
+        # Majority (>60%) of fault cases should have event_active == 0.0
+        # (30% may have fake context due to label-leakage prevention)
         inactive_count = 0
         for case in fault_cases:
             feats = extractor.extract(case)
             if feats[event_idx] == 0.0:
                 inactive_count += 1
-        assert inactive_count / len(fault_cases) >= 0.80
+        assert inactive_count / len(fault_cases) >= 0.60
 
 
 # ── Change point features ────────────────────────────────────────────

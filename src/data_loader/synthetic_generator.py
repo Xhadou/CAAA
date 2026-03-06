@@ -216,12 +216,13 @@ class SyntheticMetricsGenerator:
         for name in self.SERVICE_NAMES[: self.n_services]:
             df = self._base_metrics(name)
 
-            mult = 1.0 + (load_multiplier - 1.0) * envelope
-            df["cpu_usage"] = np.clip(df["cpu_usage"] * mult, 0, 100)
-            df["request_rate"] = np.clip(df["request_rate"] * mult, 0, None)
-            df["latency"] = np.clip(df["latency"] * mult, 0, None)
-            df["network_in"] = np.clip(df["network_in"] * mult, 0, None)
-            df["network_out"] = np.clip(df["network_out"] * mult, 0, None)
+            # Per-service multiplier jitter (±30%) for realistic variation
+            svc_mult = 1.0 + (load_multiplier - 1.0) * envelope * self.rng.uniform(0.7, 1.3)
+            df["cpu_usage"] = np.clip(df["cpu_usage"] * svc_mult, 0, 100)
+            df["request_rate"] = np.clip(df["request_rate"] * svc_mult, 0, None)
+            df["latency"] = np.clip(df["latency"] * svc_mult, 0, None)
+            df["network_in"] = np.clip(df["network_in"] * svc_mult, 0, None)
+            df["network_out"] = np.clip(df["network_out"] * svc_mult, 0, None)
 
             # Error rate stays stable — key differentiator from faults
             err_mult = self.rng.uniform(err_lo, err_hi)

@@ -3,8 +3,11 @@
 from src.models.anomaly_detector import AnomalyDetector, LSTMAutoencoder
 from src.models.baseline import (
     BaselineClassifier,
+    CatBoostBaseline,
+    LightGBMBaseline,
     NaiveBaseline,
     RuleBasedBaseline,
+    TabPFNBaseline,
     XGBoostBaseline,
 )
 from src.models.caaa_model import CAAAModel
@@ -17,8 +20,11 @@ __all__ = [
     "FeatureEncoder",
     "ContextIntegrationModule",
     "BaselineClassifier",
+    "CatBoostBaseline",
+    "LightGBMBaseline",
     "NaiveBaseline",
     "RuleBasedBaseline",
+    "TabPFNBaseline",
     "XGBoostBaseline",
     "AnomalyClassifier",
     "train_and_evaluate",

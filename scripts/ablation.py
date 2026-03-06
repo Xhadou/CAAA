@@ -24,12 +24,13 @@ from src.features.feature_schema import (
     SERVICE_LEVEL_RANGE,
     N_FEATURES,
 )
-from src.models import CAAAModel, BaselineClassifier, NaiveBaseline, RuleBasedBaseline, XGBoostBaseline
+from src.models import CAAAModel, BaselineClassifier, NaiveBaseline, RuleBasedBaseline, XGBoostBaseline, LightGBMBaseline, CatBoostBaseline
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import (
     compute_all_metrics,
     compute_false_positive_rate,
 )
+from src.utils import set_seed
 
 
 def run_caaa_variant(
@@ -152,6 +153,22 @@ def run_xgboost(X_train, y_train, X_test, y_test, naive_fp, seed=42):
     return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
 
 
+def run_lightgbm(X_train, y_train, X_test, y_test, naive_fp, seed=42):
+    """Train and evaluate the LightGBM baseline."""
+    clf = LightGBMBaseline(random_state=seed)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
+
+
+def run_catboost(X_train, y_train, X_test, y_test, naive_fp, seed=42):
+    """Train and evaluate the CatBoost baseline."""
+    clf = CatBoostBaseline(random_state=seed)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
+
+
 def main():
     parser = argparse.ArgumentParser(description="CAAA Ablation Study")
     parser.add_argument("--n-fault", type=int, default=50)
@@ -189,7 +206,7 @@ def main():
 
     args = parser.parse_args()
 
-    metrics_to_track = ["accuracy", "f1", "fp_rate", "fault_recall", "fp_reduction"]
+    metrics_to_track = ["accuracy", "f1", "f1_macro", "mcc", "fp_rate", "fault_recall", "fp_reduction"]
 
     # Variant definitions
     variants = [
@@ -203,6 +220,8 @@ def main():
         "Stat + Service-Level",
         "Baseline RF",
         "XGBoost",
+        "LightGBM",
+        "CatBoost",
         "Rule-Based",
         "Naive",
     ]
@@ -218,8 +237,7 @@ def main():
         if not use_cv:
             print(f"\n--- Run {run_idx + 1}/{args.n_runs} (seed={run_seed}) ---")
 
-        np.random.seed(run_seed if not use_cv else args.base_seed)
-        torch.manual_seed(run_seed if not use_cv else args.base_seed)
+        set_seed(run_seed if not use_cv else args.base_seed)
 
         # Generate dataset
         if args.data == "rcaeval":
@@ -283,7 +301,7 @@ def main():
 
             # Naive baseline FP rate
             naive = NaiveBaseline()
-            naive_pred = naive.predict(X_test)
+            naive_pred = naive.predict(X_test_raw)
             naive_fp = compute_false_positive_rate(y_test, naive_pred)
 
             # --- Full CAAA ---
@@ -365,10 +383,13 @@ def main():
             X_val_co = X_val.copy()
             X_train_co[:, wkl_s:beh_e] = 0.0  # zero workload + behavioral
             X_train_co[:, stat_s:svc_e] = 0.0  # zero statistical + service-level
+            X_train_co[:, 36:] = 0.0           # zero extended
             X_test_co[:, wkl_s:beh_e] = 0.0
             X_test_co[:, stat_s:svc_e] = 0.0
+            X_test_co[:, 36:] = 0.0
             X_val_co[:, wkl_s:beh_e] = 0.0
             X_val_co[:, stat_s:svc_e] = 0.0
+            X_val_co[:, 36:] = 0.0
             m = run_caaa_variant(
                 X_train_co, y_train, X_test_co, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,
@@ -431,13 +452,25 @@ def main():
             for k in metrics_to_track:
                 all_results["XGBoost"][k].append(m.get(k, 0.0))
 
+            # --- LightGBM (scale-invariant, uses unscaled features) ---
+            print("  LightGBM...")
+            m = run_lightgbm(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
+            for k in metrics_to_track:
+                all_results["LightGBM"][k].append(m.get(k, 0.0))
+
+            # --- CatBoost (scale-invariant, uses unscaled features) ---
+            print("  CatBoost...")
+            m = run_catboost(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
+            for k in metrics_to_track:
+                all_results["CatBoost"][k].append(m.get(k, 0.0))
+
             # --- Rule-Based (uses unscaled features) ---
             print("  Rule-Based...")
             m = run_rule_based(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp)
             for k in metrics_to_track:
                 all_results["Rule-Based"][k].append(m.get(k, 0.0))
 
-            # --- Naive ---
+            # --- Naive (uses unscaled features) ---
             print("  Naive...")
             m = run_naive(X_test_unscaled, y_test, naive_fp)
             for k in metrics_to_track:
@@ -456,21 +489,23 @@ def main():
     n_evals = args.cv_folds if use_cv else args.n_runs
     eval_label = f"{args.cv_folds}-fold CV" if use_cv else f"{args.n_runs} runs"
     print()
-    print("=" * 100)
+    print("=" * 106)
     print(f"ABLATION STUDY RESULTS (mean ± std over {eval_label})")
-    print("=" * 100)
-    header = f"{'Variant':<22s}{'Accuracy':>14s}{'F1 Score':>14s}{'FP Rate':>14s}{'Fault Recall':>14s}{'FP Reduction':>14s}"
+    print("=" * 106)
+    header = f"{'Variant':<22s}{'Accuracy':>12s}{'F1':>12s}{'F1 Macro':>12s}{'MCC':>12s}{'FP Rate':>12s}{'Recall':>12s}{'FP Red.':>12s}"
     print(header)
-    print("-" * 100)
+    print("-" * 106)
     for v in variants:
         s = summary[v]
         acc = f"{s['accuracy_mean']:.2f}±{s['accuracy_std']:.2f}"
         f1 = f"{s['f1_mean']:.2f}±{s['f1_std']:.2f}"
+        f1m = f"{s['f1_macro_mean']:.2f}±{s['f1_macro_std']:.2f}"
+        mcc = f"{s['mcc_mean']:.2f}±{s['mcc_std']:.2f}"
         fpr = f"{s['fp_rate_mean']:.2f}±{s['fp_rate_std']:.2f}"
         fr = f"{s['fault_recall_mean']:.2f}±{s['fault_recall_std']:.2f}"
         fpred = f"{s['fp_reduction_mean']*100:.1f}±{s['fp_reduction_std']*100:.1f}%"
-        print(f"{v:<22s}{acc:>14s}{f1:>14s}{fpr:>14s}{fr:>14s}{fpred:>14s}")
-    print("=" * 100)
+        print(f"{v:<22s}{acc:>12s}{f1:>12s}{f1m:>12s}{mcc:>12s}{fpr:>12s}{fr:>12s}{fpred:>12s}")
+    print("=" * 106)
 
     # Per-fault-type breakdown for Full CAAA on last fold
     print()

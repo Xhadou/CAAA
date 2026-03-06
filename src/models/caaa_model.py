@@ -29,7 +29,7 @@ class CAAAModel(nn.Module):
 
     def __init__(
         self,
-        input_dim: int = 36,
+        input_dim: int = 44,
         hidden_dim: int = 64,
         context_dim: int = 5,
         n_classes: int = 2,
@@ -59,7 +59,7 @@ class CAAAModel(nn.Module):
         )
         self.classifier = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, n_classes),
         )
@@ -72,7 +72,7 @@ class CAAAModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the full model.
 
-        The full 36-dim feature vector (including context dims 12-16) is
+        The full 44-dim feature vector (including context dims 12-16) is
         passed through the FeatureEncoder so that the encoder can learn
         joint representations that capture interactions between context
         and metric features.  Context features are *also* sliced out
@@ -84,7 +84,7 @@ class CAAAModel(nn.Module):
 
         Args:
             x: Input tensor of shape (batch, input_dim) containing
-                the full 36-dim feature vector.
+                the full 44-dim feature vector.
 
         Returns:
             Logits tensor of shape (batch, n_classes).

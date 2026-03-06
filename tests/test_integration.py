@@ -29,10 +29,10 @@ class TestEndToEndPipeline:
         all_cases = fault_cases + load_cases
         labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
 
-        # 2. Extract features (should be shape (10, 36))
+        # 2. Extract features (should be shape (10, 44))
         extractor = FeatureExtractor()
         X = extractor.extract_batch(all_cases).astype(np.float32)
-        assert X.shape == (10, 36)
+        assert X.shape == (10, 44)
         assert np.all(np.isfinite(X))
 
         # 3. Split 80/20
@@ -146,7 +146,7 @@ class TestContextConsistencyLoss:
         model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         ccl = ContextConsistencyLoss(alpha=0.3, beta=0.1)
 
-        x = torch.randn(8, 36)
+        x = torch.randn(8, 44)
         labels = torch.randint(0, 2, (8,))
 
         logits = model(x)
@@ -164,7 +164,7 @@ class TestContextConsistencyLoss:
         """Without context loss (alpha=0, beta=0), should equal CrossEntropyLoss."""
         torch.manual_seed(42)
         ccl = ContextConsistencyLoss(alpha=0.0, beta=0.0)
-        ce = torch.nn.CrossEntropyLoss()
+        ce = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
         logits = torch.randn(8, 2)
         labels = torch.randint(0, 2, (8,))
@@ -287,7 +287,7 @@ class TestSupConContextLoss:
         model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         loss_fn = SupConContextLoss()
 
-        x = torch.randn(16, 36)
+        x = torch.randn(16, 44)
         labels = torch.randint(0, 2, (16,))
 
         embeddings = model.get_embeddings(x)
@@ -375,7 +375,7 @@ class TestGetEmbeddings:
         """get_embeddings should return (batch, hidden_dim) tensor."""
         torch.manual_seed(42)
         model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
-        x = torch.randn(8, 36)
+        x = torch.randn(8, N_FEATURES)
 
         emb = model.get_embeddings(x)
         assert emb.shape == (8, 64)
@@ -413,7 +413,7 @@ class TestPredictWithEmbeddings:
         """Should raise RuntimeError if centroids not computed."""
         model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001)
-        X = np.random.randn(5, 36).astype(np.float32)
+        X = np.random.randn(5, N_FEATURES).astype(np.float32)
 
         with pytest.raises(RuntimeError, match="Class centroids not computed"):
             trainer.predict_with_embeddings(X)
