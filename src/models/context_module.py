@@ -3,7 +3,7 @@
 This is the novel component that integrates context features
 (event_active, event_expected_impact, time_seasonality,
 recent_deployment, context_confidence) with temporal encoding
-via attention and confidence gating.
+via FiLM conditioning and confidence gating.
 """
 
 import logging
@@ -17,19 +17,22 @@ logger = logging.getLogger(__name__)
 class ContextIntegrationModule(nn.Module):
     """Integrates context features with temporal encoding.
 
-    Uses context-aware attention and confidence gating to selectively
-    incorporate contextual information into the temporal representation.
+    Uses FiLM (Feature-wise Linear Modulation) conditioning and confidence
+    gating to selectively incorporate contextual information into the
+    temporal representation.
 
     Components:
         1. Context encoder: Encodes 5 context features to hidden_dim.
-        2. Context-aware attention: Computes attention over temporal encoding.
-        3. Confidence gating: Gates context influence using context_confidence.
+        2. FiLM conditioning: Produces gamma/beta modulation parameters.
+        3. Confidence gating: Gates context influence using multiple context signals.
         4. Residual connection: Adds input for gradient flow.
 
     Attributes:
         context_encoder: Encodes raw context features.
-        attention_layer: Produces attention weights from concatenated features.
-        confidence_gate: Scalar gate driven by context_confidence.
+        film_gamma: Linear projection producing multiplicative modulation.
+        film_beta: Linear projection producing additive modulation.
+        confidence_gate: Gate driven by context_confidence, event_active,
+            and recent_deployment.
         output_projection: Projects gated output back to temporal_dim.
     """
 
@@ -54,20 +57,18 @@ class ContextIntegrationModule(nn.Module):
         # 1. Context encoder: context_dim -> hidden_dim -> hidden_dim
         self.context_encoder = nn.Sequential(
             nn.Linear(context_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
         )
 
-        # 2. Context-aware attention
-        self.attention_layer = nn.Sequential(
-            nn.Linear(temporal_dim + hidden_dim, temporal_dim),
-            nn.Sigmoid(),
-        )
+        # 2. FiLM conditioning: gamma (scale) and beta (shift)
+        self.film_gamma = nn.Linear(hidden_dim, temporal_dim)
+        self.film_beta = nn.Linear(hidden_dim, temporal_dim)
 
-        # 3. Confidence gating
+        # 3. Confidence gating (uses context_confidence, event_active, recent_deployment)
         self.confidence_gate = nn.Sequential(
-            nn.Linear(1, 1),
+            nn.Linear(3, 1),
             nn.Sigmoid(),
         )
 
@@ -98,15 +99,19 @@ class ContextIntegrationModule(nn.Module):
         # 1. Encode context features
         context_encoded = self.context_encoder(context_features)
 
-        # 2. Context-aware attention
-        combined = torch.cat([temporal_features, context_encoded], dim=-1)
-        attention_weights = self.attention_layer(combined)
-        attended = temporal_features * attention_weights
+        # 2. FiLM conditioning: modulate temporal features
+        gamma = self.film_gamma(context_encoded)  # (batch, temporal_dim)
+        beta = self.film_beta(context_encoded)    # (batch, temporal_dim)
+        modulated = gamma * temporal_features + beta
 
-        # 3. Confidence gating using context_confidence (last context feature)
-        context_confidence = context_features[:, -1:] # (batch, 1)
-        gate = self.confidence_gate(context_confidence) # (batch, 1)
-        gated_output = gate * attended + (1 - gate) * temporal_features
+        # 3. Confidence gating using context_confidence, event_active, recent_deployment
+        gate_input = torch.cat([
+            context_features[:, -1:],  # context_confidence
+            context_features[:, 0:1],  # event_active
+            context_features[:, 3:4],  # recent_deployment
+        ], dim=-1)  # (batch, 3)
+        gate = self.confidence_gate(gate_input)  # (batch, 1)
+        gated_output = gate * modulated + (1 - gate) * temporal_features
 
         # 4. Project and add residual
         projected = self.output_projection(gated_output)

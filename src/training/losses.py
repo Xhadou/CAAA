@@ -10,6 +10,27 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 
+class FocalLoss(nn.Module):
+    """Focal loss for handling class imbalance.
+
+    Reduces the loss contribution from easy examples, focusing
+    training on hard misclassified examples.
+
+    Reference: Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017
+    """
+
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0) -> None:
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        ce_loss = F.cross_entropy(logits, labels, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return focal_loss.mean()
+
+
 class ContextConsistencyLoss(nn.Module):
     """Custom loss combining classification, context consistency, and calibration.
 
@@ -35,7 +56,7 @@ class ContextConsistencyLoss(nn.Module):
         super().__init__()
         self.alpha = alpha
         self.beta = beta
-        self.ce_loss = nn.CrossEntropyLoss()
+        self.ce_loss = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def forward(
         self,
@@ -129,7 +150,7 @@ class SupConContextLoss(nn.Module):
         self.base_temperature = base_temperature
         self.context_weight = context_weight
         self.cls_weight = cls_weight
-        self.ce_loss = nn.CrossEntropyLoss()
+        self.ce_loss = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def forward(
         self,

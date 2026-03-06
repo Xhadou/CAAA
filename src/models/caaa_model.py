@@ -29,7 +29,7 @@ class CAAAModel(nn.Module):
 
     def __init__(
         self,
-        input_dim: int = 36,
+        input_dim: int = 44,
         hidden_dim: int = 64,
         context_dim: int = 5,
         n_classes: int = 2,
@@ -59,7 +59,7 @@ class CAAAModel(nn.Module):
         )
         self.classifier = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, n_classes),
         )

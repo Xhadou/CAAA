@@ -49,7 +49,7 @@ def run_caaa_variant(
         Dictionary of evaluation metrics.
     """
     torch.manual_seed(seed)
-    model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+    model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
     trainer = CAAATrainer(
         model, learning_rate=lr,
         use_context_loss=use_context_loss,
@@ -338,7 +338,7 @@ def main():
             X_train_so = X_train.copy()
             X_test_so = X_test.copy()
             # Zero out workload [0:6], behavioral [6:12], context [12:17],
-            # and service-level [30:36]; keep only statistical [17:30]
+            # service-level [30:36], extended [36:44]; keep statistical [17:30]
             X_train_so[:, :17] = 0.0
             X_train_so[:, 30:] = 0.0
             X_test_so[:, :17] = 0.0
@@ -430,7 +430,7 @@ def main():
 
     # Re-run Full CAAA on last fold to get predictions for breakdown
     torch.manual_seed(args.base_seed)
-    _ft_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+    _ft_model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
     _ft_trainer = CAAATrainer(
         _ft_model, learning_rate=args.lr,
         use_context_loss=True,
@@ -508,7 +508,7 @@ def main():
         # Full CAAA (uses KernelExplainer, slower)
         print("  Full CAAA SHAP (KernelExplainer, may take a moment)...")
         torch.manual_seed(args.base_seed)
-        caaa_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        caaa_model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
         caaa_trainer = CAAATrainer(
             caaa_model, learning_rate=args.lr,
             use_context_loss=True,
@@ -540,7 +540,7 @@ def main():
 
         # Train a fresh Full CAAA model for calibration analysis
         torch.manual_seed(args.base_seed)
-        cal_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        cal_model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
         cal_trainer = CAAATrainer(
             cal_model, learning_rate=args.lr,
             use_context_loss=True,

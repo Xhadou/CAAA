@@ -23,7 +23,7 @@ class FeatureEncoder(nn.Module):
 
     def __init__(
         self,
-        input_dim: int = 36,
+        input_dim: int = 44,
         hidden_dim: int = 64,
         num_layers: int = 2,
         dropout: float = 0.1,
@@ -33,7 +33,7 @@ class FeatureEncoder(nn.Module):
         Args:
             input_dim: Dimensionality of input feature vectors.
             hidden_dim: Dimensionality of hidden layers.
-            num_layers: Number of Linear + ReLU + Dropout blocks.
+            num_layers: Number of Linear + LayerNorm + GELU + Dropout blocks.
             dropout: Dropout probability.
         """
         super().__init__()
@@ -44,14 +44,16 @@ class FeatureEncoder(nn.Module):
         # First layer: input_dim -> hidden_dim
         layers.extend([
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
             nn.Dropout(dropout),
         ])
         # Additional layers: hidden_dim -> hidden_dim
         for _ in range(num_layers - 1):
             layers.extend([
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
+                nn.LayerNorm(hidden_dim),
+                nn.GELU(),
                 nn.Dropout(dropout),
             ])
         self.layers = nn.Sequential(*layers)

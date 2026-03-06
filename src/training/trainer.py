@@ -10,7 +10,7 @@ import torch.nn as nn
 
 from src.features.feature_schema import CONTEXT_START as _CONTEXT_START, CONTEXT_END as _CONTEXT_END
 from src.models import CAAAModel
-from src.training.losses import ContextConsistencyLoss, SupConContextLoss
+from src.training.losses import ContextConsistencyLoss, FocalLoss, SupConContextLoss
 from src.utils import resolve_device
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class CAAATrainer:
     """Trainer for the CAAA model.
 
     Handles training, evaluation, and prediction for the CAAAModel
-    using PyTorch with Adam optimizer and CrossEntropyLoss.
+    using PyTorch with AdamW optimizer and CrossEntropyLoss.
 
     **Important**: Input features should be standardized (zero mean, unit
     variance) before passing to ``train()``. Use
@@ -29,7 +29,7 @@ class CAAATrainer:
     Attributes:
         model: The CAAAModel instance.
         device: Device to run computations on.
-        optimizer: Adam optimizer.
+        optimizer: AdamW optimizer.
         criterion: CrossEntropyLoss criterion.
     """
 
@@ -46,7 +46,7 @@ class CAAATrainer:
 
         Args:
             model: The CAAAModel to train.
-            learning_rate: Learning rate for the Adam optimizer.
+            learning_rate: Learning rate for the AdamW optimizer.
             weight_decay: Weight decay (L2 regularization) for the optimizer.
             device: Device to run computations on (``"auto"``, ``"cpu"``,
                 or ``"cuda"``).  ``"auto"`` selects CUDA when available.
@@ -67,13 +67,18 @@ class CAAATrainer:
             self.loss_type = "cross_entropy"
 
         self.use_context_loss = self.loss_type == "context_consistency"
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=learning_rate, weight_decay=weight_decay
+        )
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', factor=0.5, patience=5
         )
         if self.loss_type == "contrastive":
             self.criterion = SupConContextLoss()
         elif self.loss_type == "context_consistency":
             self.criterion = ContextConsistencyLoss()
+        elif self.loss_type == "focal":
+            self.criterion = FocalLoss()
         else:
             self.criterion = nn.CrossEntropyLoss()
         self.temperature = 1.0  # default: no scaling; updated by calibrate_temperature()
@@ -157,6 +162,10 @@ class CAAATrainer:
                 else:
                     loss = self.criterion(logits, y_batch)
                 loss.backward()
+                if torch.isnan(loss):
+                    logger.warning("NaN loss detected at epoch %d, batch %d", epoch + 1, n_batches)
+                    continue
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
 
                 epoch_loss += loss.item()
@@ -188,6 +197,7 @@ class CAAATrainer:
             if has_val:
                 val_loss = self._compute_loss(X_val_t, y_val_t)
                 history["val_loss"].append(val_loss)
+                self.scheduler.step(val_loss)
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -209,7 +219,11 @@ class CAAATrainer:
                     break
 
             if (epoch + 1) % 10 == 0 or epoch == 0:
-                msg = f"Epoch {epoch + 1}/{epochs} - train_loss: {avg_train_loss:.4f}"
+                grad_norm = sum(
+                    p.grad.data.norm(2).item() ** 2
+                    for p in self.model.parameters() if p.grad is not None
+                ) ** 0.5
+                msg = f"Epoch {epoch + 1}/{epochs} - train_loss: {avg_train_loss:.4f} - grad_norm: {grad_norm:.4f}"
                 if has_val:
                     msg += f" - val_loss: {history['val_loss'][-1]:.4f}"
                 logger.info(msg)

@@ -84,7 +84,7 @@ def main():
 
     # Train CAAA model
     print("Training CAAA model...")
-    model = CAAAModel(input_dim=36)
+    model = CAAAModel(input_dim=44)
     trainer = CAAATrainer(model, learning_rate=0.001)
     trainer.train(
         X_train, y_train, X_val=X_val, y_val=y_val,

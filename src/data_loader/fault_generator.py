@@ -86,6 +86,25 @@ class FaultGenerator:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _ar1_signal(length: int, lo: float, hi: float, phi: float = 0.9) -> np.ndarray:
+        """Generate an AR(1) autocorrelated signal for realistic fault patterns.
+
+        Args:
+            length: Number of timesteps.
+            lo: Lower bound for random innovations.
+            hi: Upper bound for random innovations.
+            phi: Autoregression coefficient (0=white noise, 1=random walk).
+
+        Returns:
+            1-D array of length *length* with temporally correlated values.
+        """
+        signal = np.zeros(length)
+        signal[0] = np.random.uniform(lo, hi)
+        for t in range(1, length):
+            signal[t] = phi * signal[t - 1] + (1 - phi) * np.random.uniform(lo, hi)
+        return signal
+
     def _base_metrics(self, service_name: str) -> pd.DataFrame:
         """Generate a DataFrame of normal-operation metrics for one service.
 
@@ -116,9 +135,13 @@ class FaultGenerator:
         fault_slice = slice(fault_start, n)
 
         if fault_type == "cpu_hog":
+            # AR(1) process for temporally realistic fault signals
+            ar_signal = np.zeros(fault_len)
+            ar_signal[0] = np.random.uniform(30, 60)
+            for t in range(1, fault_len):
+                ar_signal[t] = 0.9 * ar_signal[t - 1] + 0.1 * np.random.uniform(30, 60)
             df.loc[fault_slice, "cpu_usage"] = np.clip(
-                df.loc[fault_slice, "cpu_usage"].values
-                + np.random.uniform(30, 60, fault_len),
+                df.loc[fault_slice, "cpu_usage"].values + ar_signal,
                 0, 100,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
@@ -143,7 +166,7 @@ class FaultGenerator:
         elif fault_type == "network_delay":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(200, 800, fault_len),
+                + self._ar1_signal(fault_len, 200, 800),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
@@ -168,12 +191,12 @@ class FaultGenerator:
         elif fault_type == "disk_io":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(100, 500, fault_len),
+                + self._ar1_signal(fault_len, 100, 500),
                 0, None,
             )
             df.loc[fault_slice, "cpu_usage"] = np.clip(
                 df.loc[fault_slice, "cpu_usage"].values
-                + np.random.uniform(10, 30, fault_len),
+                + self._ar1_signal(fault_len, 10, 30),
                 0, 100,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
@@ -199,7 +222,7 @@ class FaultGenerator:
         elif fault_type == "dns_failure":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(500, 2000, fault_len),
+                + self._ar1_signal(fault_len, 500, 2000),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
@@ -214,7 +237,7 @@ class FaultGenerator:
         elif fault_type == "connection_pool_exhaustion":
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(300, 1000, fault_len),
+                + self._ar1_signal(fault_len, 300, 1000),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
@@ -236,7 +259,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(50, 300, fault_len),
+                + self._ar1_signal(fault_len, 50, 300),
                 0, None,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
@@ -254,7 +277,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(50, 200, fault_len),
+                + self._ar1_signal(fault_len, 50, 200),
                 0, None,
             )
 
@@ -267,7 +290,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "latency"] = np.clip(
                 df.loc[fault_slice, "latency"].values
-                + np.random.uniform(200, 600, fault_len),
+                + self._ar1_signal(fault_len, 200, 600),
                 0, None,
             )
             df.loc[fault_slice, "request_rate"] = np.clip(

@@ -23,6 +23,8 @@ import os
 import sys
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 import numpy as np
 import torch
 import yaml

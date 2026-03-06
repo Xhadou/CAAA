@@ -32,7 +32,7 @@ def feature_data():
 
 @pytest.fixture
 def feature_encoder():
-    return FeatureEncoder(input_dim=36, hidden_dim=64)
+    return FeatureEncoder(input_dim=44, hidden_dim=64)
 
 
 @pytest.fixture
@@ -42,20 +42,20 @@ def context_module():
 
 @pytest.fixture
 def caaa_model():
-    return CAAAModel(input_dim=36, hidden_dim=64, context_dim=5, n_classes=2)
+    return CAAAModel(input_dim=44, hidden_dim=64, context_dim=5, n_classes=2)
 
 
 # ── FeatureEncoder ───────────────────────────────────────────────────
 
 class TestFeatureEncoder:
     def test_feature_encoder_output_shape(self, feature_encoder):
-        x = torch.randn(4, 36)
+        x = torch.randn(4, 44)
         feature_encoder.eval()
         out = feature_encoder(x)
         assert out.shape == (4, 64)
 
     def test_feature_encoder_single_sample(self, feature_encoder):
-        x = torch.randn(1, 36)
+        x = torch.randn(1, 44)
         feature_encoder.eval()
         out = feature_encoder(x)
         assert out.shape == (1, 64)
@@ -76,25 +76,25 @@ class TestContextModule:
 
 class TestCAAAModel:
     def test_caaa_model_forward(self, caaa_model):
-        x = torch.randn(4, 36)
+        x = torch.randn(4, 44)
         caaa_model.eval()
         logits = caaa_model(x)
         assert logits.shape == (4, 2)
 
     def test_caaa_model_predict(self, caaa_model):
-        x = torch.randn(8, 36)
+        x = torch.randn(8, 44)
         preds = caaa_model.predict(x)
         assert preds.shape == (8,)
         assert all(p in (0, 1) for p in preds.tolist())
 
     def test_caaa_model_training_step(self):
         torch.manual_seed(0)
-        model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         criterion = nn.CrossEntropyLoss()
 
-        x = torch.randn(16, 36)
+        x = torch.randn(16, 44)
         y = torch.randint(0, 2, (16,))
 
         losses = []
@@ -144,7 +144,7 @@ class TestBaselineClassifier:
 class TestNaiveBaseline:
     def test_naive_baseline(self):
         nb = NaiveBaseline()
-        X = np.random.randn(10, 36)
+        X = np.random.randn(10, 44)
         preds = nb.predict(X)
         npt.assert_array_equal(preds, 0)
         assert preds.shape == (10,)
