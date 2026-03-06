@@ -237,8 +237,8 @@ class AnomalyDetector:
             raise RuntimeError("Model not trained yet — call fit() first.")
         torch.save({
             "model_state": self.model.state_dict(),
-            "scaler_mean": self.scaler.mean_,
-            "scaler_scale": self.scaler.scale_,
+            "scaler_mean": torch.as_tensor(self.scaler.mean_),
+            "scaler_scale": torch.as_tensor(self.scaler.scale_),
             "threshold": self.threshold,
             "config": {
                 "hidden_dim": self.hidden_dim,

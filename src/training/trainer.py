@@ -57,7 +57,8 @@ class CAAATrainer:
             loss_type: Loss function variant:
                 ``"context_consistency"`` — ContextConsistencyLoss (default).
                 ``"contrastive"`` — SupConContextLoss.
-                ``"cross_entropy"`` — plain CrossEntropyLoss.
+                ``"focal"`` — FocalLoss with class-balancing.
+                ``"cross_entropy"`` — plain CrossEntropyLoss (no smoothing).
             max_grad_norm: Maximum gradient norm for clipping. Set to 0 to
                 disable gradient clipping.
         """
@@ -147,7 +148,7 @@ class CAAATrainer:
             n_batches = 0
 
             indices = torch.randperm(n_samples, device=self.device)
-            for start in range(0, n_samples, batch_size):
+            for batch_num, start in enumerate(range(0, n_samples, batch_size)):
                 batch_idx = indices[start : start + batch_size]
                 X_batch = X_train_t[batch_idx]
                 y_batch = y_train_t[batch_idx]
@@ -168,7 +169,7 @@ class CAAATrainer:
                     logits = self.model(X_batch)
                     loss = self.criterion(logits, y_batch)
                 if torch.isnan(loss):
-                    logger.warning("NaN loss detected at epoch %d, batch %d", epoch + 1, n_batches)
+                    logger.warning("NaN loss detected at epoch %d, batch %d", epoch + 1, batch_num + 1)
                     continue
                 loss.backward()
                 if self.max_grad_norm > 0:
