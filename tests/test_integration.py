@@ -11,7 +11,7 @@ from src.evaluation.metrics import (
     compute_false_positive_rate,
 )
 from src.features import FeatureExtractor
-from src.features.feature_schema import CONTEXT_START, CONTEXT_END
+from src.features.feature_schema import CONTEXT_START, CONTEXT_END, N_FEATURES
 from src.models import CAAAModel, NaiveBaseline
 from src.training.losses import ContextConsistencyLoss, SupConContextLoss
 from src.training.trainer import CAAATrainer
@@ -43,7 +43,7 @@ class TestEndToEndPipeline:
 
         # 4. Train CAAAModel for 10 epochs (with ContextConsistencyLoss)
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         history = trainer.train(
             X_train, y_train, epochs=10, batch_size=8,
@@ -104,7 +104,7 @@ class TestAblationNoContext:
         X[:, CONTEXT_START:CONTEXT_END] = 0.0
 
         torch.manual_seed(123)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         history = trainer.train(X, labels, epochs=5, batch_size=8)
 
@@ -143,7 +143,7 @@ class TestContextConsistencyLoss:
     def test_context_consistency_loss_gradients(self):
         """Gradients should flow through all CCL components."""
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         ccl = ContextConsistencyLoss(alpha=0.3, beta=0.1)
 
         x = torch.randn(8, 44)
@@ -211,7 +211,7 @@ class TestTemperatureScaling:
         )
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         trainer.train(X_train, y_train, epochs=20, batch_size=8)
 
@@ -238,7 +238,7 @@ class TestTemperatureScaling:
         )
 
         torch.manual_seed(99)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         trainer.train(X_train, y_train, epochs=20, batch_size=8)
 
@@ -284,7 +284,7 @@ class TestSupConContextLoss:
     def test_supcon_gradients_flow(self):
         """Gradients should flow through all model parameters."""
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         loss_fn = SupConContextLoss()
 
         x = torch.randn(16, 44)
@@ -333,7 +333,7 @@ class TestContrastiveTraining:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(
             model, learning_rate=0.001, loss_type="contrastive",
         )
@@ -357,7 +357,7 @@ class TestContrastiveTraining:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(
             model, learning_rate=0.001, loss_type="contrastive",
         )
@@ -374,8 +374,8 @@ class TestGetEmbeddings:
     def test_get_embeddings_shape(self):
         """get_embeddings should return (batch, hidden_dim) tensor."""
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
-        x = torch.randn(8, 44)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        x = torch.randn(8, N_FEATURES)
 
         emb = model.get_embeddings(x)
         assert emb.shape == (8, 64)
@@ -396,7 +396,7 @@ class TestPredictWithEmbeddings:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(
             model, learning_rate=0.001, loss_type="contrastive",
         )
@@ -411,9 +411,9 @@ class TestPredictWithEmbeddings:
 
     def test_predict_with_embeddings_raises_without_centroids(self):
         """Should raise RuntimeError if centroids not computed."""
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001)
-        X = np.random.randn(5, 44).astype(np.float32)
+        X = np.random.randn(5, N_FEATURES).astype(np.float32)
 
         with pytest.raises(RuntimeError, match="Class centroids not computed"):
             trainer.predict_with_embeddings(X)
@@ -434,7 +434,7 @@ class TestAdaptiveThreshold:
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
         trainer.train(X, labels, epochs=10, batch_size=8)
 
@@ -456,23 +456,136 @@ class TestAdaptiveThreshold:
         extractor = FeatureExtractor()
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
+        # Guarantee context variability: set context_confidence to a range
+        # of distinct values so that adaptive thresholding must differ from
+        # fixed thresholding.
+        ctx_conf_idx = CONTEXT_END - 1
+        X[:, ctx_conf_idx] = np.linspace(0.0, 1.0, len(X))
+
         torch.manual_seed(42)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         trainer = CAAATrainer(model, learning_rate=0.001, use_context_loss=True)
-        trainer.train(X, labels, epochs=15, batch_size=8)
+        # Use fewer epochs to produce a less confident model whose
+        # predictions are near the threshold boundary.
+        trainer.train(X, labels, epochs=5, batch_size=8)
 
         preds_fixed, _ = trainer.predict_with_confidence_fixed(
             X, confidence_threshold=0.7,
         )
         preds_adaptive, _ = trainer.predict_with_confidence(
-            X, base_threshold=0.7, context_sensitivity=0.2,
+            X, base_threshold=0.7, context_sensitivity=0.3,
         )
-        # With context_sensitivity > 0, results should generally differ
         assert preds_fixed.shape == preds_adaptive.shape
-        # Verify that at least some predictions differ when context varies
-        # (context_confidence is not constant 0.5 across samples)
-        ctx_conf = X[:, CONTEXT_END - 1]
-        if not np.allclose(ctx_conf, 0.5, atol=0.01):
-            # With varying context confidence, adaptive should differ from fixed
-            assert not np.array_equal(preds_fixed, preds_adaptive), \
-                "Adaptive and fixed should differ with varying context_confidence"
+        assert not np.array_equal(preds_fixed, preds_adaptive), \
+            "Adaptive and fixed should differ with varying context_confidence"
+
+
+class TestGradientClipping:
+    """Test that gradient clipping is applied during training."""
+
+    def test_gradient_clipping_enabled(self):
+        """Trainer should have gradient clipping enabled by default."""
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001)
+        assert trainer.max_grad_norm == 1.0
+
+    def test_gradient_clipping_custom(self):
+        """Trainer should accept custom max_grad_norm."""
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001, max_grad_norm=0.5)
+        assert trainer.max_grad_norm == 0.5
+
+    def test_training_with_gradient_clipping(self):
+        """Training with gradient clipping should converge normally."""
+        fault_cases, load_cases = generate_combined_dataset(
+            n_fault=10, n_load=10, seed=42,
+        )
+        all_cases = fault_cases + load_cases
+        labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
+
+        extractor = FeatureExtractor()
+        X = extractor.extract_batch(all_cases).astype(np.float32)
+
+        torch.manual_seed(42)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(
+            model, learning_rate=0.001, max_grad_norm=1.0,
+        )
+        history = trainer.train(X, labels, epochs=10, batch_size=8)
+        assert history["train_loss"][0] > history["train_loss"][-1]
+
+
+class TestLRScheduling:
+    """Test that the learning rate scheduler is integrated."""
+
+    def test_scheduler_exists(self):
+        """Trainer should have a ReduceLROnPlateau scheduler."""
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001)
+        assert hasattr(trainer, "scheduler")
+        assert type(trainer.scheduler).__name__ == "ReduceLROnPlateau"
+
+    def test_training_with_scheduler(self):
+        """Training with validation should trigger scheduler steps."""
+        fault_cases, load_cases = generate_combined_dataset(
+            n_fault=10, n_load=10, seed=42,
+        )
+        all_cases = fault_cases + load_cases
+        labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
+
+        extractor = FeatureExtractor()
+        X = extractor.extract_batch(all_cases).astype(np.float32)
+
+        from sklearn.model_selection import train_test_split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, labels, test_size=0.3, random_state=42, stratify=labels,
+        )
+
+        torch.manual_seed(42)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        trainer = CAAATrainer(model, learning_rate=0.001)
+        history = trainer.train(
+            X_train, y_train, X_val=X_val, y_val=y_val,
+            epochs=10, batch_size=8,
+        )
+        assert "val_loss" in history
+        assert len(history["val_loss"]) > 0
+
+
+# ── Ablation schema ranges ───────────────────────────────────────────
+
+class TestAblationSchemaRanges:
+    """Verify ablation script uses feature_schema ranges correctly."""
+
+    def test_schema_ranges_match_expected_indices(self):
+        """Feature schema ranges should match the documented layout."""
+        from src.features.feature_schema import (
+            CONTEXT_RANGE, BEHAVIORAL_RANGE, WORKLOAD_RANGE,
+            STATISTICAL_RANGE, SERVICE_LEVEL_RANGE,
+        )
+        assert WORKLOAD_RANGE == (0, 6)
+        assert BEHAVIORAL_RANGE == (6, 12)
+        assert CONTEXT_RANGE == (12, 17)
+        assert STATISTICAL_RANGE == (17, 30)
+        assert SERVICE_LEVEL_RANGE == (30, 36)
+
+    def test_ablation_imports_schema_constants(self):
+        """The ablation script should import from feature_schema, not hardcode."""
+        import ast
+        with open("scripts/ablation.py") as f:
+            source = f.read()
+        tree = ast.parse(source)
+        # Check that CONTEXT_RANGE (etc.) are imported
+        imports = [
+            node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        ]
+        schema_imports = [
+            imp for imp in imports
+            if imp.module and "feature_schema" in imp.module
+        ]
+        assert len(schema_imports) > 0, "ablation.py should import from feature_schema"
+        imported_names = []
+        for imp in schema_imports:
+            imported_names.extend(alias.name for alias in imp.names)
+        assert "CONTEXT_RANGE" in imported_names
+        assert "BEHAVIORAL_RANGE" in imported_names

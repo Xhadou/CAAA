@@ -137,12 +137,17 @@ class TestSyntheticGeneratorLoadSpike:
 
     def test_load_spike_cpu_increase(self):
         gen = SyntheticMetricsGenerator(n_services=4, sequence_length=60, seed=99)
-        services, ctx = gen.generate_load_spike_metrics(load_multiplier=4.0)
-        # During a big spike the mean CPU across services should be higher
-        # than normal baseline (~20). With multiplier 4, at least some
-        # services should have max CPU > 30.
-        max_cpus = [sm.metrics["cpu_usage"].max() for sm in services]
-        assert max(max_cpus) > 30
+        # Generate a normal baseline for comparison
+        normal_services = gen.generate_normal_metrics()
+        normal_max_cpus = [sm.metrics["cpu_usage"].max() for sm in normal_services]
+        normal_max = max(normal_max_cpus)
+
+        gen_spike = SyntheticMetricsGenerator(n_services=4, sequence_length=60, seed=99)
+        services, ctx = gen_spike.generate_load_spike_metrics(load_multiplier=4.0)
+        # During a big spike the max CPU across services should exceed the
+        # normal baseline maximum.
+        spike_max_cpus = [sm.metrics["cpu_usage"].max() for sm in services]
+        assert max(spike_max_cpus) > normal_max
 
     def test_all_five_event_types_supported(self):
         """Verify all 5 event types can be generated."""
@@ -412,10 +417,12 @@ class TestHardDataset:
         for case in cf_cases:
             assert case.fault_service is not None
             assert case.fault_type is not None
-            # Count services with mean error_rate > 0.05 (elevated)
+            # Count services with mean error_rate > 0.02 (elevated above
+            # normal baseline of ~0.005, accounting for attenuation on
+            # cascaded services)
             elevated_services = [
                 svc.service_name for svc in case.services
-                if svc.metrics["error_rate"].mean() > 0.05
+                if svc.metrics["error_rate"].mean() > 0.02
             ]
             assert len(elevated_services) >= 2, (
                 f"Expected 2+ elevated services, got {len(elevated_services)}: "

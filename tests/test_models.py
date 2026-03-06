@@ -32,7 +32,7 @@ def feature_data():
 
 @pytest.fixture
 def feature_encoder():
-    return FeatureEncoder(input_dim=44, hidden_dim=64)
+    return FeatureEncoder(input_dim=N_FEATURES, hidden_dim=64)
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def context_module():
 
 @pytest.fixture
 def caaa_model():
-    return CAAAModel(input_dim=44, hidden_dim=64, context_dim=5, n_classes=2)
+    return CAAAModel(input_dim=N_FEATURES, hidden_dim=64, context_dim=5, n_classes=2)
 
 
 # ── FeatureEncoder ───────────────────────────────────────────────────
@@ -59,6 +59,11 @@ class TestFeatureEncoder:
         feature_encoder.eval()
         out = feature_encoder(x)
         assert out.shape == (1, 64)
+
+    def test_feature_encoder_has_layer_norm(self, feature_encoder):
+        """FeatureEncoder should include LayerNorm for stable training."""
+        has_ln = any(isinstance(m, nn.LayerNorm) for m in feature_encoder.modules())
+        assert has_ln, "FeatureEncoder should contain LayerNorm layers"
 
 
 # ── ContextIntegrationModule ─────────────────────────────────────────
@@ -89,7 +94,7 @@ class TestCAAAModel:
 
     def test_caaa_model_training_step(self):
         torch.manual_seed(0)
-        model = CAAAModel(input_dim=44, hidden_dim=64, n_classes=2)
+        model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
         model.train()
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         criterion = nn.CrossEntropyLoss()

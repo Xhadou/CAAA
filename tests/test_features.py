@@ -148,3 +148,56 @@ class TestChangePointFeatures:
         names = extractor.feature_names()
         assert "change_point_magnitude" in names
         assert "memory_trend_uniformity" not in names
+
+
+# ── Reproducibility ──────────────────────────────────────────────────
+
+class TestFeatureReproducibility:
+    def test_same_seed_produces_identical_features(self, dataset):
+        """Extracting the same data with the same seed should be deterministic."""
+        fault_cases, load_cases = dataset
+        all_cases = fault_cases + load_cases
+
+        ext1 = FeatureExtractor(seed=42)
+        X1 = ext1.extract_batch(all_cases)
+
+        ext2 = FeatureExtractor(seed=42)
+        X2 = ext2.extract_batch(all_cases)
+
+        np.testing.assert_array_equal(X1, X2)
+
+    def test_different_seed_produces_different_features(self, dataset):
+        """Different seeds should produce different context features."""
+        fault_cases, load_cases = dataset
+        all_cases = fault_cases + load_cases
+
+        ext1 = FeatureExtractor(seed=42)
+        X1 = ext1.extract_batch(all_cases)
+
+        ext2 = FeatureExtractor(seed=99)
+        X2 = ext2.extract_batch(all_cases)
+
+        # Context features (indices 12-17) should differ due to noise
+        assert not np.allclose(X1[:, 12:17], X2[:, 12:17])
+
+    def test_extraction_order_independent(self, dataset):
+        """Features for a case should not depend on extraction order.
+
+        Verifies fix for Issue #1: per-case deterministic RNG ensures
+        extracting case A then case B gives the same result as
+        extracting case B then case A.
+        """
+        fault_cases, load_cases = dataset
+        all_cases = fault_cases + load_cases
+
+        # Extract in original order
+        ext1 = FeatureExtractor(seed=42)
+        feat_first = ext1.extract(all_cases[0])
+
+        # Extract in reversed order — case 0 is now extracted last
+        ext2 = FeatureExtractor(seed=42)
+        for c in reversed(all_cases[1:]):
+            ext2.extract(c)
+        feat_after_others = ext2.extract(all_cases[0])
+
+        np.testing.assert_array_equal(feat_first, feat_after_others)

@@ -80,7 +80,7 @@ class FaultGenerator:
         """
         self.n_services = n_services
         self.sequence_length = sequence_length
-        np.random.seed(seed)
+        self.rng = np.random.default_rng(seed)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -114,7 +114,7 @@ class FaultGenerator:
         Returns:
             DataFrame with normal baseline metrics.
         """
-        return generate_base_metrics(self.sequence_length, service_name)
+        return generate_base_metrics(self.sequence_length, service_name, rng=self.rng)
 
     def _inject_fault(
         self, df: pd.DataFrame, fault_type: str, fault_start: int
@@ -142,20 +142,20 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.1, 0.5),
+                + self.rng.uniform(0.1, 0.5),
                 0, 1,
             )
 
         elif fault_type == "memory_leak":
             # Gradual memory increase (leak pattern)
-            leak_ramp = np.linspace(0, np.random.uniform(30, 55), fault_len)
+            leak_ramp = np.linspace(0, self.rng.uniform(30, 55), fault_len)
             df.loc[fault_slice, "memory_usage"] = np.clip(
                 df.loc[fault_slice, "memory_usage"].values + leak_ramp,
                 0, 100,
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.1, 0.5),
+                + self.rng.uniform(0.1, 0.5),
                 0, 1,
             )
 
@@ -167,7 +167,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.05, 0.3),
+                + self.rng.uniform(0.05, 0.3),
                 0, 1,
             )
 
@@ -180,7 +180,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.1, 0.5),
+                + self.rng.uniform(0.1, 0.5),
                 0, 1,
             )
 
@@ -197,7 +197,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.05, 0.2),
+                + self.rng.uniform(0.05, 0.2),
                 0, 1,
             )
 
@@ -208,7 +208,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.4, 0.8),
+                + self.rng.uniform(0.4, 0.8),
                 0, 1,
             )
             df.loc[fault_slice, "cpu_usage"] = np.clip(
@@ -223,7 +223,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.2, 0.6),
+                + self.rng.uniform(0.2, 0.6),
                 0, 1,
             )
             df.loc[fault_slice, "network_in"] = np.clip(
@@ -238,7 +238,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.15, 0.5),
+                + self.rng.uniform(0.15, 0.5),
                 0, 1,
             )
             # Requests back up
@@ -248,7 +248,7 @@ class FaultGenerator:
 
         elif fault_type == "thread_leak":
             # CPU climbs gradually, latency grows
-            leak_ramp = np.linspace(0, np.random.uniform(20, 50), fault_len)
+            leak_ramp = np.linspace(0, self.rng.uniform(20, 50), fault_len)
             df.loc[fault_slice, "cpu_usage"] = np.clip(
                 df.loc[fault_slice, "cpu_usage"].values + leak_ramp,
                 0, 100,
@@ -260,7 +260,7 @@ class FaultGenerator:
             )
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.05, 0.3),
+                + self.rng.uniform(0.05, 0.3),
                 0, 1,
             )
 
@@ -268,7 +268,7 @@ class FaultGenerator:
             # Immediate error spike, some latency increase
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.2, 0.7),
+                + self.rng.uniform(0.2, 0.7),
                 0, 1,
             )
             df.loc[fault_slice, "latency"] = np.clip(
@@ -281,7 +281,7 @@ class FaultGenerator:
             # Downstream dependency dies — errors spike, latency goes up
             df.loc[fault_slice, "error_rate"] = np.clip(
                 df.loc[fault_slice, "error_rate"].values
-                + np.random.uniform(0.2, 0.6),
+                + self.rng.uniform(0.2, 0.6),
                 0, 1,
             )
             df.loc[fault_slice, "latency"] = np.clip(
@@ -299,11 +299,42 @@ class FaultGenerator:
     # Public API
     # ------------------------------------------------------------------
 
+    def inject_fault(
+        self, df: pd.DataFrame, fault_type: str, fault_start: int
+    ) -> pd.DataFrame:
+        """Inject a fault into the metrics starting at fault_start.
+
+        Public wrapper around the internal fault injection logic.
+
+        Args:
+            df: Baseline metrics DataFrame.
+            fault_type: One of the 11 supported fault types.
+            fault_start: Index at which the fault begins.
+
+        Returns:
+            Modified DataFrame with the fault injected.
+        """
+        return self._inject_fault(df, fault_type, fault_start)
+
+    def generate_base_metrics(self, service_name: str) -> pd.DataFrame:
+        """Generate a DataFrame of normal-operation metrics for one service.
+
+        Public wrapper around the internal base metrics generation.
+
+        Args:
+            service_name: Name of the service.
+
+        Returns:
+            DataFrame with normal baseline metrics.
+        """
+        return self._base_metrics(service_name)
+
     def generate_fault_metrics(
         self,
         system: str = "online-boutique",
         fault_type: Optional[str] = None,
         fault_service: Optional[str] = None,
+        case_seed: Optional[int] = None,
     ) -> Tuple[List[ServiceMetrics], str, str]:
         """Generate metrics that simulate a fault in one microservice.
 
@@ -319,21 +350,28 @@ class FaultGenerator:
                 types if not given.
             fault_service: Service to inject the fault into. Random (excluding
                 loadgenerator) if not given.
+            case_seed: When provided, an independent RNG seeded with this
+                value is used for this call, avoiding sequential state
+                dependence on ``self.rng``.
 
         Returns:
             Tuple of (list of ServiceMetrics, fault_service name, fault_type).
         """
+        if case_seed is not None:
+            original_rng = self.rng
+            self.rng = np.random.default_rng(case_seed)
+
         eligible_services = [s for s in self.SERVICE_NAMES[: self.n_services] if s != "loadgenerator"]
 
         if fault_type is None:
-            fault_type = str(np.random.choice(self.FAULT_TYPES))
+            fault_type = str(self.rng.choice(self.FAULT_TYPES))
         if fault_service is None:
-            fault_service = str(np.random.choice(eligible_services))
+            fault_service = str(self.rng.choice(eligible_services))
 
         # Fault starts at a random point in the middle third of the sequence
         mid_start = self.sequence_length // 3
         mid_end = 2 * self.sequence_length // 3
-        fault_start = int(np.random.randint(mid_start, mid_end))
+        fault_start = int(self.rng.integers(mid_start, mid_end))
 
         logger.info(
             "Generating fault metrics: system=%s service=%s type=%s start=%d",
@@ -349,5 +387,8 @@ class FaultGenerator:
             if name == fault_service:
                 df = self._inject_fault(df, fault_type, fault_start)
             results.append(ServiceMetrics(service_name=name, metrics=df))
+
+        if case_seed is not None:
+            self.rng = original_rng
 
         return results, fault_service, fault_type

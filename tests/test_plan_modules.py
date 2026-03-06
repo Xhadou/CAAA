@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from src.data_loader import generate_combined_dataset
-from src.features.extractors import FeatureExtractor
+from src.features.extractors import FeatureExtractor, N_FEATURES
 from src.models.classifier import AnomalyClassifier, train_and_evaluate
 
 
@@ -91,7 +91,7 @@ class TestAnomalyClassifier:
         imp = clf.get_feature_importance()
         assert imp is not None
         assert isinstance(imp, pd.Series)
-        assert len(imp) == 44
+        assert len(imp) == N_FEATURES
 
     def test_save_load(self, feature_data, tmp_path):
         X, y = feature_data

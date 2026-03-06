@@ -1,6 +1,7 @@
 """Load and parse RCAEval dataset format."""
 
 import json
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -8,6 +9,8 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from src.data_loader.data_types import AnomalyCase, ServiceMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class RCAEvalLoader:
@@ -190,6 +193,9 @@ class RCAEvalLoader:
 
             metrics = self.load_metrics(case_dir)
             if metrics.empty:
+                logger.warning(
+                    "Empty metrics for case %s — skipping", case_dir.name,
+                )
                 continue
 
             # Parse wide-format into per-service metrics

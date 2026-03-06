@@ -84,14 +84,14 @@ class AnomalyClassifier:
 
     def fit(
         self,
-        X: pd.DataFrame,
+        X: np.ndarray,
         y: np.ndarray,
         validate: bool = True,
     ) -> Dict:
         """Train the classifier.
 
         Args:
-            X: Feature matrix (DataFrame with named columns).
+            X: Feature matrix (ndarray or DataFrame).
             y: Labels (string or integer array).
             validate: Whether to run 5-fold cross-validation.
 
@@ -128,11 +128,11 @@ class AnomalyClassifier:
     # Prediction
     # ------------------------------------------------------------------
 
-    def predict(self, X) -> np.ndarray:
+    def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict class labels.
 
         Args:
-            X: Feature matrix (DataFrame or ndarray).
+            X: Feature matrix (ndarray or DataFrame).
 
         Returns:
             Array of predicted label strings.
@@ -143,7 +143,7 @@ class AnomalyClassifier:
         y_encoded = self.model.predict(X_clean)
         return self.label_encoder.inverse_transform(y_encoded)
 
-    def predict_proba(self, X) -> pd.DataFrame:
+    def predict_proba(self, X: np.ndarray) -> pd.DataFrame:
         """Predict class probabilities.
 
         Args:
@@ -160,7 +160,7 @@ class AnomalyClassifier:
 
     def predict_with_confidence(
         self,
-        X,
+        X: np.ndarray,
         confidence_threshold: float = 0.6,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Predict with confidence threshold — returns UNKNOWN below threshold.
@@ -178,22 +178,19 @@ class AnomalyClassifier:
                 for the PyTorch-based equivalent using integer labels.
         """
         probas = self.predict_proba(X)
-        predictions: List[str] = []
-        confidences: List[float] = []
-
-        for _, row in probas.iterrows():
-            max_prob = float(row.max())
-            max_class = str(row.idxmax())
-            predictions.append(max_class if max_prob >= confidence_threshold else "UNKNOWN")
-            confidences.append(max_prob)
-
-        return np.array(predictions), np.array(confidences)
+        proba_values = probas.values
+        confidences = proba_values.max(axis=1)
+        max_class_indices = proba_values.argmax(axis=1)
+        class_names = probas.columns.to_numpy()
+        predictions = class_names[max_class_indices]
+        predictions = np.where(confidences >= confidence_threshold, predictions, "UNKNOWN")
+        return predictions, confidences
 
     # ------------------------------------------------------------------
     # Evaluation
     # ------------------------------------------------------------------
 
-    def evaluate(self, X, y: np.ndarray) -> Dict:
+    def evaluate(self, X: np.ndarray, y: np.ndarray) -> Dict:
         """Evaluate classifier performance.
 
         Args:
@@ -254,7 +251,7 @@ class AnomalyClassifier:
 # ------------------------------------------------------------------
 
 def train_and_evaluate(
-    X: pd.DataFrame,
+    X: np.ndarray,
     y: np.ndarray,
     test_size: float = 0.2,
     model_type: str = "random_forest",

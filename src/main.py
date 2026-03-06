@@ -97,7 +97,7 @@ def run_pipeline(
         seed: Random seed.
         output_dir: Directory for saved results.
         data_source: ``"synthetic"`` or ``"rcaeval"``.
-        dataset: RCAEval dataset identifier (``"RE1"`` or ``"RE2"``).
+        dataset: RCAEval dataset identifier (``"RE1"``, ``"RE2"``, or ``"RE3"``).
         system: Microservice system for RCAEval.
         n_load_per_fault: Synthetic loads per RCAEval fault case.
         data_dir: Path to downloaded RCAEval data.
@@ -173,9 +173,11 @@ def run_pipeline(
         missed = 0
 
         for case in all_cases:
-            # Use first service's metrics for detection
-            _, max_score = detector.detect(case.services[0].metrics)
-            if max_score > 1.0:
+            # Check all services and take the max anomaly score
+            case_max_score = max(
+                detector.detect(svc.metrics)[1] for svc in case.services
+            )
+            if case_max_score > 1.0:
                 detected_cases.append(case)
                 detected_labels.append(case.label)
             else:
@@ -255,6 +257,12 @@ def run_pipeline(
         stratify=y_trainval,
     )
 
+    # Further split training data to get a calibration set for temperature
+    # scaling (avoids data leakage from calibrating on the test set).
+    X_train, X_cal, y_train, y_cal = train_test_split(
+        X_train, y_train, test_size=0.125, random_state=seed, stratify=y_train,
+    )
+
     # Step 3b: Scale AFTER split (fit on train only) for neural models
     scaler = None
     if model_type in ("caaa", "mlp"):
@@ -262,6 +270,7 @@ def run_pipeline(
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X_train)
         X_val = scaler.transform(X_val)
+        X_cal = scaler.transform(X_cal)
         X_test = scaler.transform(X_test)
 
     # ------------------------------------------------------------------
@@ -269,14 +278,16 @@ def run_pipeline(
     # ------------------------------------------------------------------
     print(f"\n[3/5] Training {model_type} model...")
     if model_type == "caaa":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         model = CAAAModel(input_dim=X_train.shape[1])
         trainer = CAAATrainer(model, learning_rate=learning_rate, device=device)
         trainer.train(
             X_train, y_train, X_val=X_val, y_val=y_val,
             epochs=epochs, batch_size=batch_size, early_stopping_patience=10,
         )
-        # Post-hoc temperature calibration on validation set (NOT test)
-        trainer.calibrate_temperature(X_val, y_val)
+        # Post-hoc temperature calibration on held-out calibration set
+        # (NOT the test set, to avoid data leakage)
+        trainer.calibrate_temperature(X_cal, y_cal)
         y_pred = trainer.predict(X_test)
     elif model_type == "xgboost":
         bl = XGBoostBaseline(random_state=seed)
@@ -364,7 +375,7 @@ def main() -> None:
         help="Data source: synthetic (default) or rcaeval (real faults)",
     )
     parser.add_argument("--dataset", type=str, default="RE1",
-                        choices=["RE1", "RE2"], help="RCAEval dataset")
+                        choices=["RE1", "RE2", "RE3"], help="RCAEval dataset")
     parser.add_argument("--system", type=str, default="online-boutique",
                         choices=["online-boutique", "sock-shop", "train-ticket"],
                         help="Microservice system (for rcaeval)")

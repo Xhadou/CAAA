@@ -41,6 +41,19 @@ class ContextConsistencyLoss(nn.Module):
         3. Confidence calibration loss: Penalizes high entropy when
            context confidence is high.
 
+    Penalty scale note:
+        When ``event_active ≈ 0.5`` and model probabilities are also
+        ``≈ 0.5``, the per-sample penalty
+        ``(penalty_when_event + penalty_when_no_event)`` approaches 1.0.
+        With the default ``alpha=0.3``, this contributes up to 0.3 to
+        the total loss — comparable in magnitude to the classification
+        cross-entropy on well-separated data.  The consistency penalty
+        therefore dominates the loss gradient early in training when the
+        model is uncertain and the context signal is ambiguous.  As
+        training progresses and predictions become more confident, the
+        penalty shrinks because one of the two probability terms
+        approaches zero.
+
     Attributes:
         alpha: Weight for the context consistency loss component.
         beta: Weight for the confidence calibration loss component.

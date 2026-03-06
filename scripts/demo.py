@@ -78,6 +78,13 @@ def main():
         stratify=y_trainval,
     )
 
+    # Further split training data for validation (avoids data leakage).
+    # 12.5% of the 80% training split ≈ 10% of total data, giving a
+    # ~70/10/20 train/val/test split.
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train, y_train, test_size=0.125, random_state=args.seed, stratify=y_train,
+    )
+
     # Scale features (fit on train only) for neural models
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
@@ -87,7 +94,7 @@ def main():
     # Train CAAA model
     print("Training CAAA model...")
     device = resolve_device(args.device)
-    model = CAAAModel(input_dim=44)
+    model = CAAAModel(input_dim=X_train.shape[1])
     trainer = CAAATrainer(model, learning_rate=0.001, device=device)
     trainer.train(
         X_train, y_train, X_val=X_val, y_val=y_val,

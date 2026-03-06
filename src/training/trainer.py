@@ -41,6 +41,7 @@ class CAAATrainer:
         device: str = "auto",
         use_context_loss: bool = True,
         loss_type: str = "context_consistency",
+        max_grad_norm: float = 1.0,
     ) -> None:
         """Initializes the CAAATrainer.
 
@@ -57,10 +58,13 @@ class CAAATrainer:
                 ``"context_consistency"`` — ContextConsistencyLoss (default).
                 ``"contrastive"`` — SupConContextLoss.
                 ``"cross_entropy"`` — plain CrossEntropyLoss.
+            max_grad_norm: Maximum gradient norm for clipping. Set to 0 to
+                disable gradient clipping.
         """
         self.device = resolve_device(device)
         self.model = model.to(self.device)
         self.loss_type = loss_type
+        self.max_grad_norm = max_grad_norm
 
         # Backward compat: use_context_loss=False overrides to cross_entropy
         if not use_context_loss and loss_type == "context_consistency":
@@ -71,7 +75,7 @@ class CAAATrainer:
             self.model.parameters(), lr=learning_rate, weight_decay=weight_decay
         )
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=5
+            self.optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6,
         )
         if self.loss_type == "contrastive":
             self.criterion = SupConContextLoss()
@@ -149,23 +153,26 @@ class CAAATrainer:
                 y_batch = y_train_t[batch_idx]
 
                 self.optimizer.zero_grad()
-                logits = self.model(X_batch)
                 if self.loss_type == "contrastive":
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
                     embeddings = self.model.get_embeddings(X_batch)
+                    logits = self.model.classifier(embeddings)
                     loss, components = self.criterion(
                         embeddings, logits, y_batch, context,
                     )
                 elif self.use_context_loss:
+                    logits = self.model(X_batch)
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
                     loss, components = self.criterion(logits, y_batch, context)
                 else:
+                    logits = self.model(X_batch)
                     loss = self.criterion(logits, y_batch)
                 if torch.isnan(loss):
                     logger.warning("NaN loss detected at epoch %d, batch %d", epoch + 1, n_batches)
                     continue
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                if self.max_grad_norm > 0:
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
                 epoch_loss += loss.item()
@@ -197,6 +204,7 @@ class CAAATrainer:
             if has_val:
                 val_loss = self._compute_loss(X_val_t, y_val_t)
                 history["val_loss"].append(val_loss)
+                # Step the LR scheduler based on validation loss
                 self.scheduler.step(val_loss)
 
                 if val_loss < best_val_loss:
@@ -217,6 +225,9 @@ class CAAATrainer:
                     if best_state is not None:
                         self.model.load_state_dict(best_state)
                     break
+            else:
+                # No validation set — schedule based on training loss
+                self.scheduler.step(avg_train_loss)
 
             if (epoch + 1) % 10 == 0 or epoch == 0:
                 grad_norm = sum(
@@ -245,12 +256,21 @@ class CAAATrainer:
 
         self.model.eval()
         with torch.no_grad():
-            logits = self.model(X_t)
-            if self.use_context_loss:
+            if self.loss_type == "contrastive":
+                context = X_t[:, _CONTEXT_START:_CONTEXT_END]
+                embeddings = self.model.get_embeddings(X_t)
+                logits = self.model.classifier(embeddings)
+                loss_tensor, _ = self.criterion(
+                    embeddings, logits, y_t, context,
+                )
+                loss = loss_tensor.item()
+            elif self.use_context_loss:
+                logits = self.model(X_t)
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 loss_tensor, _ = self.criterion(logits, y_t, context)
                 loss = loss_tensor.item()
             else:
+                logits = self.model(X_t)
                 loss = self.criterion(logits, y_t).item()
             preds = torch.argmax(logits, dim=-1)
             accuracy = (preds == y_t).float().mean().item()
@@ -314,7 +334,7 @@ class CAAATrainer:
             return loss
 
         optimizer.step(eval_fn)
-        self.temperature = temperature.item()
+        self.temperature = max(temperature.item(), 0.01)
         logger.info("Calibrated temperature: %.4f", self.temperature)
         return self.temperature
 
@@ -525,14 +545,16 @@ class CAAATrainer:
         """
         self.model.eval()
         with torch.no_grad():
-            logits = self.model(X_t)
             if self.loss_type == "contrastive":
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 embeddings = self.model.get_embeddings(X_t)
+                logits = self.model.classifier(embeddings)
                 loss, _ = self.criterion(embeddings, logits, y_t, context)
             elif self.use_context_loss:
+                logits = self.model(X_t)
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 loss, _ = self.criterion(logits, y_t, context)
             else:
+                logits = self.model(X_t)
                 loss = self.criterion(logits, y_t)
         return loss.item()

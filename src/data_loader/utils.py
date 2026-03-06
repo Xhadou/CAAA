@@ -1,6 +1,6 @@
 """Shared utilities for data generation modules."""
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -80,7 +80,11 @@ _DEFAULT_PROFILE: Dict[str, Tuple[float, float]] = {
 }
 
 
-def generate_base_metrics(sequence_length: int, service_name: str) -> pd.DataFrame:
+def generate_base_metrics(
+    sequence_length: int,
+    service_name: str,
+    rng: Optional[np.random.Generator] = None,
+) -> pd.DataFrame:
     """Generate a DataFrame of normal-operation metrics for one service.
 
     Uses per-service baseline profiles for realistic differentiation
@@ -89,23 +93,32 @@ def generate_base_metrics(sequence_length: int, service_name: str) -> pd.DataFra
 
     Args:
         sequence_length: Number of timesteps in the sequence.
-        service_name: Name of the service.
+        service_name: Name of the service — used to look up per-service
+            baseline profiles for realistic differentiation.
+        rng: NumPy random Generator instance.  When *None* a new
+            unseeded generator is created (non-deterministic).
 
     Returns:
         DataFrame with columns: timestamp, cpu_usage, memory_usage,
         request_rate, error_rate, latency, network_in, network_out.
     """
+    if rng is None:
+        rng = np.random.default_rng()
+
     n = sequence_length
-    noise = lambda scale: np.random.normal(0, scale, n)
+
+    def noise(scale):
+        return rng.normal(0, scale, n)
+
     profile = SERVICE_PROFILES.get(service_name, _DEFAULT_PROFILE)
 
-    cpu = np.random.uniform(*profile["cpu"]) + noise(2)
-    mem = np.random.uniform(*profile["mem"]) + noise(1.5)
-    req = np.random.uniform(*profile["req"]) + noise(5)
-    err = np.random.uniform(*profile["err"]) + noise(0.001)
-    lat = np.random.uniform(*profile["lat"]) + noise(3)
-    net_in = np.random.uniform(*profile["net_in"]) + noise(50)
-    net_out = np.random.uniform(*profile["net_out"]) + noise(50)
+    cpu = rng.uniform(*profile["cpu"]) + noise(2)
+    mem = rng.uniform(*profile["mem"]) + noise(1.5)
+    req = rng.uniform(*profile["req"]) + noise(5)
+    err = rng.uniform(*profile["err"]) + noise(0.001)
+    lat = rng.uniform(*profile["lat"]) + noise(3)
+    net_in = rng.uniform(*profile["net_in"]) + noise(50)
+    net_out = rng.uniform(*profile["net_out"]) + noise(50)
 
     # Clamp to sensible ranges
     cpu = np.clip(cpu, 0, 100)

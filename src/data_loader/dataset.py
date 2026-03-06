@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 # Systems matching RCAEval benchmark.
 RESEARCH_SYSTEMS: List[str] = ["online-boutique", "sock-shop", "train-ticket"]
 
+# Multiplier used to derive per-case seeds from the base seed and case index.
+# Must be large enough to avoid overlap between different generation phases
+# (e.g., seed * _CASE_SEED_MULT + i vs (seed+1) * _CASE_SEED_MULT + j).
+_CASE_SEED_MULT: int = 10000
+
 
 def generate_combined_dataset(
     n_fault: int = 50,
@@ -39,6 +44,7 @@ def generate_combined_dataset(
     if systems is None:
         systems = ["online-boutique"]
 
+    rng = np.random.default_rng(seed)
     fault_gen = FaultGenerator(seed=seed)
     load_gen = SyntheticMetricsGenerator(seed=seed + 1)
 
@@ -49,22 +55,23 @@ def generate_combined_dataset(
     logger.info("Generating %d fault cases", n_fault)
     for i in range(n_fault):
         system = systems[i % len(systems)]
+        case_seed = seed * _CASE_SEED_MULT + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
-            system=system
+            system=system, case_seed=case_seed,
         )
         fault_context = {}
-        if np.random.random() < 0.3:
+        if rng.random() < 0.3:
             fault_context["recent_deployment"] = True
         # 30% of fault cases get a fake context with event_type to prevent
         # event_active from being a perfect proxy for the label.
-        if np.random.random() < 0.30:
-            fake_event = str(np.random.choice([
+        if rng.random() < 0.30:
+            fake_event = str(rng.choice([
                 "flash_sale", "marketing_campaign", "scheduled_batch",
             ]))
             fault_context["event_type"] = fake_event
             fault_context["event_name"] = f"{fake_event}_event"
             fault_context["load_multiplier"] = float(
-                np.random.uniform(1.2, 2.5)
+                rng.uniform(1.2, 2.5)
             )
         fault_cases.append(
             AnomalyCase(
@@ -82,10 +89,13 @@ def generate_combined_dataset(
     logger.info("Generating %d expected-load cases", n_load)
     for i in range(n_load):
         system = systems[i % len(systems)]
-        services, context = load_gen.generate_load_spike_metrics(system=system)
+        case_seed = (seed + 1) * _CASE_SEED_MULT + i
+        services, context = load_gen.generate_load_spike_metrics(
+            system=system, case_seed=case_seed,
+        )
         # 30% of load cases get empty context (simulating unscheduled load
         # spikes with no calendar entry) to prevent label leakage.
-        if np.random.random() < 0.30:
+        if rng.random() < 0.30:
             context = {}
         load_cases.append(
             AnomalyCase(
@@ -155,7 +165,7 @@ def generate_research_dataset(
         n_fault=735, n_load=600, systems=systems, seed=seed,
     )
 
-    rng = np.random.RandomState(seed)
+    rng = np.random.default_rng(seed)
 
     # Shuffle within each class
     fault_idx = rng.permutation(len(fault_cases)).tolist()
@@ -333,7 +343,7 @@ def generate_hard_dataset(
     if systems is None:
         systems = ["online-boutique"]
 
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     fault_gen = FaultGenerator(seed=seed)
     load_gen = SyntheticMetricsGenerator(seed=seed + 1)
 
@@ -343,16 +353,20 @@ def generate_hard_dataset(
     # --- (a) FAULT_DURING_EVENT: fault injected on top of load spike ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
+        case_seed_load = seed * _CASE_SEED_MULT + i
+        case_seed_fault = seed * _CASE_SEED_MULT + 1000 + i
         # Generate a load spike first
-        services, context = load_gen.generate_load_spike_metrics(system=system)
+        services, context = load_gen.generate_load_spike_metrics(
+            system=system, case_seed=case_seed_load,
+        )
         # Pick a random service (not loadgenerator) to inject a fault
         eligible = [s for s in services if s.service_name != "loadgenerator"]
-        fault_svc = eligible[np.random.randint(len(eligible))]
-        fault_type = str(np.random.choice(fault_gen.FAULT_TYPES))
+        fault_svc = eligible[rng.integers(len(eligible))]
+        fault_type = str(rng.choice(fault_gen.FAULT_TYPES))
         # Inject fault at a random point during the spike
         n_ts = len(fault_svc.metrics)
-        fault_start = int(np.random.randint(n_ts // 4, 3 * n_ts // 4))
-        fault_svc.metrics = fault_gen._inject_fault(
+        fault_start = int(rng.integers(n_ts // 4, 3 * n_ts // 4))
+        fault_svc.metrics = fault_gen.inject_fault(
             fault_svc.metrics, fault_type, fault_start,
         )
         fault_cases.append(
@@ -370,9 +384,10 @@ def generate_hard_dataset(
     # --- (b) CAPACITY_EXCEEDED_LOAD: extreme load causes errors ---
     for i in range(n_load_per_type):
         system = systems[i % len(systems)]
-        high_mult = float(np.random.uniform(5.0, 10.0))
+        case_seed_b = seed * _CASE_SEED_MULT + 2000 + i
+        high_mult = float(rng.uniform(5.0, 10.0))
         services, context = load_gen.generate_load_spike_metrics(
-            system=system, load_multiplier=high_mult,
+            system=system, load_multiplier=high_mult, case_seed=case_seed_b,
         )
         # Add load-correlated error increases (0.05-0.15) during the spike
         spike_start = context.get("spike_start", 0)
@@ -385,7 +400,7 @@ def generate_hard_dataset(
             # Moderate error increase correlated with load envelope
             actual_len = len(df.loc[spike_sl, "error_rate"])
             if actual_len > 0:
-                err_increase = np.random.uniform(0.05, 0.15) * np.ones(actual_len)
+                err_increase = rng.uniform(0.05, 0.15) * np.ones(actual_len)
                 err_increase *= np.linspace(0.3, 1.0, actual_len)  # ramp with load
                 df.loc[spike_sl, "error_rate"] = np.clip(
                     df.loc[spike_sl, "error_rate"].values + err_increase, 0, 1,
@@ -403,8 +418,9 @@ def generate_hard_dataset(
     # --- (c) GRADUAL_FAULT: slow ramp-up over full window ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
+        case_seed_c = seed * _CASE_SEED_MULT + 3000 + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
-            system=system,
+            system=system, case_seed=case_seed_c,
         )
         # Replace the sudden fault with a gradual ramp over the full window
         for svc in services:
@@ -414,17 +430,17 @@ def generate_hard_dataset(
                 ramp = np.linspace(0, 1, n_ts)
                 # Gradually increase error_rate
                 df["error_rate"] = np.clip(
-                    df["error_rate"].values + ramp * np.random.uniform(0.1, 0.4),
+                    df["error_rate"].values + ramp * rng.uniform(0.1, 0.4),
                     0, 1,
                 )
                 # Gradually increase latency
                 df["latency"] = np.clip(
-                    df["latency"].values + ramp * np.random.uniform(50, 300),
+                    df["latency"].values + ramp * rng.uniform(50, 300),
                     0, None,
                 )
                 # Gradually increase CPU
                 df["cpu_usage"] = np.clip(
-                    df["cpu_usage"].values + ramp * np.random.uniform(10, 40),
+                    df["cpu_usage"].values + ramp * rng.uniform(10, 40),
                     0, 100,
                 )
         fault_cases.append(
@@ -442,16 +458,17 @@ def generate_hard_dataset(
     # --- (e) CORRELATED_FAULT: fault propagates to neighbor services ---
     for i in range(n_fault_per_type):
         system = systems[i % len(systems)]
+        case_seed_e = seed * _CASE_SEED_MULT + 4000 + i
         services, fault_service, fault_type = fault_gen.generate_fault_metrics(
-            system=system,
+            system=system, case_seed=case_seed_e,
         )
         # Pick 2-3 neighbor services and inject attenuated faults
         neighbors = _SERVICE_ADJACENCY.get(fault_service, [])
         svc_map = {s.service_name: s for s in services}
-        n_cascade = min(np.random.randint(2, 4), len(neighbors))
+        n_cascade = min(rng.integers(2, 4), len(neighbors))
         if n_cascade > 0 and neighbors:
             cascade_targets = list(
-                np.random.choice(neighbors, size=n_cascade, replace=False)
+                rng.choice(neighbors, size=n_cascade, replace=False)
             )
             for target_name in cascade_targets:
                 if target_name not in svc_map:
@@ -460,24 +477,24 @@ def generate_hard_dataset(
                 df = target_svc.metrics
                 n_ts = len(df)
                 # Attenuated severity: 50-80% of what the primary service got
-                attenuation = np.random.uniform(0.5, 0.8)
+                attenuation = rng.uniform(0.5, 0.8)
                 fault_start = n_ts // 3
                 fault_sl = slice(fault_start, n_ts)
                 fault_len = n_ts - fault_start
                 # Inject attenuated error/latency increases
                 df.loc[fault_sl, "error_rate"] = np.clip(
                     df.loc[fault_sl, "error_rate"].values
-                    + np.random.uniform(0.05, 0.25) * attenuation,
+                    + rng.uniform(0.05, 0.25) * attenuation,
                     0, 1,
                 )
                 df.loc[fault_sl, "latency"] = np.clip(
                     df.loc[fault_sl, "latency"].values
-                    + np.random.uniform(50, 200, fault_len) * attenuation,
+                    + rng.uniform(50, 200, fault_len) * attenuation,
                     0, None,
                 )
                 df.loc[fault_sl, "cpu_usage"] = np.clip(
                     df.loc[fault_sl, "cpu_usage"].values
-                    + np.random.uniform(5, 20, fault_len) * attenuation,
+                    + rng.uniform(5, 20, fault_len) * attenuation,
                     0, 100,
                 )
         fault_cases.append(
@@ -495,18 +512,21 @@ def generate_hard_dataset(
     # --- (d) PARTIAL_LOAD: spike affects only 3-4 services ---
     for i in range(n_load_per_type):
         system = systems[i % len(systems)]
-        services, context = load_gen.generate_load_spike_metrics(system=system)
+        case_seed_d = seed * _CASE_SEED_MULT + 5000 + i
+        services, context = load_gen.generate_load_spike_metrics(
+            system=system, case_seed=case_seed_d,
+        )
         # Reset most services to baseline (keep only 3-4 affected)
-        n_affected = np.random.randint(
+        n_affected = rng.integers(
             min(3, len(services)), min(5, len(services)) + 1,
         )
         affected_indices = set(
-            np.random.choice(len(services), size=n_affected, replace=False)
+            rng.choice(len(services), size=n_affected, replace=False)
         )
         for idx, svc in enumerate(services):
             if idx not in affected_indices:
                 # Regenerate as normal baseline metrics
-                svc.metrics = load_gen._base_metrics(svc.service_name)
+                svc.metrics = load_gen.generate_base_metrics(svc.service_name)
         load_cases.append(
             AnomalyCase(
                 case_id=f"hard_partial_load_{i:04d}",
