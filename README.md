@@ -212,7 +212,7 @@ python -m src.main --n-fault 50 --n-load 50 --model rule_based
 
 ### Ablation Study
 
-The ablation script evaluates 12 model variants systematically to answer the research questions:
+The ablation script evaluates 14 model variants systematically to answer the research questions:
 
 ```bash
 # Standard ablation (5 runs per variant)
@@ -245,8 +245,10 @@ python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5 --inc
 | 8 | Stat + Service-Level | Combined traditional features |
 | 9 | Baseline RF | Random Forest baseline |
 | 10 | XGBoost | XGBoost baseline |
-| 11 | Rule-Based | Heuristic rules |
-| 12 | Naive | No-context naive classifier |
+| 11 | LightGBM | LightGBM baseline |
+| 12 | CatBoost | CatBoost baseline |
+| 13 | Rule-Based | Heuristic rules |
+| 14 | Naive | No-context naive classifier |
 
 ### Using RCAEval Real-World Data
 
@@ -412,7 +414,7 @@ All model and training parameters are configurable via `configs/config.yaml`. Ke
 | `training.learning_rate` | 0.001 | Adam optimizer learning rate |
 | `training.early_stopping_patience` | 10 | Epochs to wait before early stopping |
 | `training.test_split` | 0.2 | Fraction of data reserved for testing |
-| `training.val_split` | 0.1 | Fraction of training data for validation |
+| `training.val_split` | 0.2 | Fraction of training data for validation |
 
 ### Training Features
 
