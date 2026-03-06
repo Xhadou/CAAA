@@ -217,7 +217,7 @@ class SyntheticMetricsGenerator:
             df = self._base_metrics(name)
 
             # Per-service multiplier jitter (±30%) for realistic variation
-            svc_mult = 1.0 + (load_multiplier - 1.0) * envelope * np.random.uniform(0.7, 1.3)
+            svc_mult = 1.0 + (load_multiplier - 1.0) * envelope * self.rng.uniform(0.7, 1.3)
             df["cpu_usage"] = np.clip(df["cpu_usage"] * svc_mult, 0, 100)
             df["request_rate"] = np.clip(df["request_rate"] * svc_mult, 0, None)
             df["latency"] = np.clip(df["latency"] * svc_mult, 0, None)

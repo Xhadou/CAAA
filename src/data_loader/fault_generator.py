@@ -86,8 +86,7 @@ class FaultGenerator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _ar1_signal(length: int, lo: float, hi: float, phi: float = 0.9) -> np.ndarray:
+    def _ar1_signal(self, length: int, lo: float, hi: float, phi: float = 0.9) -> np.ndarray:
         """Generate an AR(1) autocorrelated signal for realistic fault patterns.
 
         Args:
@@ -100,9 +99,9 @@ class FaultGenerator:
             1-D array of length *length* with temporally correlated values.
         """
         signal = np.zeros(length)
-        signal[0] = np.random.uniform(lo, hi)
+        signal[0] = self.rng.uniform(lo, hi)
         for t in range(1, length):
-            signal[t] = phi * signal[t - 1] + (1 - phi) * np.random.uniform(lo, hi)
+            signal[t] = phi * signal[t - 1] + (1 - phi) * self.rng.uniform(lo, hi)
         return signal
 
     def _base_metrics(self, service_name: str) -> pd.DataFrame:

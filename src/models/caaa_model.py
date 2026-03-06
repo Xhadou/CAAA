@@ -72,7 +72,7 @@ class CAAAModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the full model.
 
-        The full 36-dim feature vector (including context dims 12-16) is
+        The full 44-dim feature vector (including context dims 12-16) is
         passed through the FeatureEncoder so that the encoder can learn
         joint representations that capture interactions between context
         and metric features.  Context features are *also* sliced out

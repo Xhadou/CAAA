@@ -383,10 +383,13 @@ def main():
             X_val_co = X_val.copy()
             X_train_co[:, wkl_s:beh_e] = 0.0  # zero workload + behavioral
             X_train_co[:, stat_s:svc_e] = 0.0  # zero statistical + service-level
+            X_train_co[:, 36:] = 0.0           # zero extended
             X_test_co[:, wkl_s:beh_e] = 0.0
             X_test_co[:, stat_s:svc_e] = 0.0
+            X_test_co[:, 36:] = 0.0
             X_val_co[:, wkl_s:beh_e] = 0.0
             X_val_co[:, stat_s:svc_e] = 0.0
+            X_val_co[:, 36:] = 0.0
             m = run_caaa_variant(
                 X_train_co, y_train, X_test_co, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,

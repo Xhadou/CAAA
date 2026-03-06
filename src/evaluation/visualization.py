@@ -36,6 +36,7 @@ _FEATURE_GROUP_COLORS = {
     "context": "#2ecc71",
     "statistical": "#f39c12",
     "service-level": "#9b59b6",
+    "extended": "#1abc9c",
 }
 
 
