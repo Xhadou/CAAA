@@ -135,11 +135,7 @@ class FaultGenerator:
         fault_slice = slice(fault_start, n)
 
         if fault_type == "cpu_hog":
-            # AR(1) process for temporally realistic fault signals
-            ar_signal = np.zeros(fault_len)
-            ar_signal[0] = np.random.uniform(30, 60)
-            for t in range(1, fault_len):
-                ar_signal[t] = 0.9 * ar_signal[t - 1] + 0.1 * np.random.uniform(30, 60)
+            ar_signal = self._ar1_signal(fault_len, 30, 60)
             df.loc[fault_slice, "cpu_usage"] = np.clip(
                 df.loc[fault_slice, "cpu_usage"].values + ar_signal,
                 0, 100,

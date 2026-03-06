@@ -22,7 +22,7 @@ from src.evaluation.metrics import (
     compute_all_metrics,
     compute_false_positive_rate,
 )
-from src.utils import set_seed, resolve_device
+from src.utils import set_seed
 
 
 def run_caaa_variant(
@@ -373,10 +373,12 @@ def main():
             print("  Stat + Service-Level...")
             X_train_ssl = X_train.copy()
             X_test_ssl = X_test.copy()
-            # Zero out workload [0:6], behavioral [6:12], context [12:17];
+            # Zero out workload [0:6], behavioral [6:12], context [12:17], extended [36:44];
             # keep statistical [17:30] and service-level [30:36]
             X_train_ssl[:, :17] = 0.0
             X_test_ssl[:, :17] = 0.0
+            X_train_ssl[:, 36:] = 0.0
+            X_test_ssl[:, 36:] = 0.0
             m = run_caaa_variant(
                 X_train_ssl, y_train, X_test_ssl, y_test, naive_fp,
                 args.epochs, args.batch_size, args.lr,

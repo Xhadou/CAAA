@@ -164,7 +164,7 @@ class TestContextConsistencyLoss:
         """Without context loss (alpha=0, beta=0), should equal CrossEntropyLoss."""
         torch.manual_seed(42)
         ccl = ContextConsistencyLoss(alpha=0.0, beta=0.0)
-        ce = torch.nn.CrossEntropyLoss()
+        ce = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
         logits = torch.randn(8, 2)
         labels = torch.randint(0, 2, (8,))

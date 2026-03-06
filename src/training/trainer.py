@@ -161,10 +161,10 @@ class CAAATrainer:
                     loss, components = self.criterion(logits, y_batch, context)
                 else:
                     loss = self.criterion(logits, y_batch)
-                loss.backward()
                 if torch.isnan(loss):
                     logger.warning("NaN loss detected at epoch %d, batch %d", epoch + 1, n_batches)
                     continue
+                loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
 

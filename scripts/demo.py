@@ -20,7 +20,7 @@ from src.features import FeatureExtractor
 from src.models import CAAAModel, NaiveBaseline
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import compute_all_metrics, compute_false_positive_rate
-from src.utils import set_seed
+from src.utils import set_seed, resolve_device
 
 
 def main():
@@ -36,6 +36,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--config", type=str, default=None, help="Path to config YAML file")
+    parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"],
+                        help="Device for training (default: auto)")
     args = parser.parse_args()
 
     # Load config if provided
@@ -84,8 +86,9 @@ def main():
 
     # Train CAAA model
     print("Training CAAA model...")
+    device = resolve_device(args.device)
     model = CAAAModel(input_dim=44)
-    trainer = CAAATrainer(model, learning_rate=0.001)
+    trainer = CAAATrainer(model, learning_rate=0.001, device=device)
     trainer.train(
         X_train, y_train, X_val=X_val, y_val=y_val,
         epochs=args.epochs, batch_size=16, early_stopping_patience=10,

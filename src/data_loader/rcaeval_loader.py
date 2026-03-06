@@ -1,7 +1,6 @@
 """Load and parse RCAEval dataset format."""
 
 import json
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
