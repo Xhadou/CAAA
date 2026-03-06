@@ -58,7 +58,7 @@ CAAA uses an optional two-stage pipeline:
  Metrics ──► [Stage 1] ──►  ┌───────────┐  ┌───────────┐  ┌──────────┐  │
  (optional   Anomaly      │ │  Feature  │─►│ Context   │─►│ Classif. │──► FAULT / EXPECTED_LOAD / UNKNOWN
   LSTM-AE)   Detection    │ │  Encoder  │  │ Module    │  │   Head   │  │
-                          │ │(MLP+LN)  │  │(FiLM+Gate)│  │  (GELU)  │  │
+                          │ │(MLP+LN)   │  │(FiLM+Gate)│  │  (GELU)  │  │
                           │ │ 44d → 64d │  │ 5 context │  │ 2-class  │  │
                           └─────────────────────────────────────────────┘
 ```
