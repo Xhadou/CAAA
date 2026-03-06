@@ -91,7 +91,7 @@ class TestAnomalyClassifier:
         imp = clf.get_feature_importance()
         assert imp is not None
         assert isinstance(imp, pd.Series)
-        assert len(imp) == 36
+        assert len(imp) == 44
 
     def test_save_load(self, feature_data, tmp_path):
         X, y = feature_data

@@ -229,3 +229,201 @@ class XGBoostBaseline:
             Class probabilities of shape (n_samples, n_classes).
         """
         return self.model.predict_proba(X)
+
+
+class LightGBMBaseline:
+    """LightGBM gradient boosting baseline.
+
+    Wraps ``lightgbm.LGBMClassifier`` with sensible defaults for the CAAA
+    anomaly attribution task.
+
+    Attributes:
+        model: Underlying LGBMClassifier instance.
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        max_depth: int = 6,
+        learning_rate: float = 0.1,
+        random_state: int = 42,
+    ) -> None:
+        """Initializes the LightGBMBaseline.
+
+        Args:
+            n_estimators: Number of boosting rounds.
+            max_depth: Maximum tree depth.
+            learning_rate: Boosting learning rate.
+            random_state: Random seed for reproducibility.
+        """
+        from lightgbm import LGBMClassifier
+
+        self.model = LGBMClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            random_state=random_state,
+            verbosity=-1,
+        )
+        logger.info(
+            "LightGBMBaseline initialized: n_estimators=%d, max_depth=%d, lr=%.3f",
+            n_estimators, max_depth, learning_rate,
+        )
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
+        """Fits the model on training data.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+            y: Target labels of shape (n_samples,).
+        """
+        self.model.fit(X, y)
+        logger.info("LightGBMBaseline fitted on %d samples", len(y))
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predicts class labels.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+
+        Returns:
+            Predicted labels of shape (n_samples,).
+        """
+        return self.model.predict(X)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predicts class probabilities.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+
+        Returns:
+            Class probabilities of shape (n_samples, n_classes).
+        """
+        return self.model.predict_proba(X)
+
+
+class CatBoostBaseline:
+    """CatBoost gradient boosting baseline.
+
+    Wraps ``catboost.CatBoostClassifier`` with sensible defaults for the CAAA
+    anomaly attribution task.
+
+    Attributes:
+        model: Underlying CatBoostClassifier instance.
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        max_depth: int = 6,
+        learning_rate: float = 0.1,
+        random_state: int = 42,
+    ) -> None:
+        """Initializes the CatBoostBaseline.
+
+        Args:
+            n_estimators: Number of boosting iterations.
+            max_depth: Maximum tree depth.
+            learning_rate: Boosting learning rate.
+            random_state: Random seed for reproducibility.
+        """
+        from catboost import CatBoostClassifier
+
+        self.model = CatBoostClassifier(
+            iterations=n_estimators,
+            depth=max_depth,
+            learning_rate=learning_rate,
+            random_seed=random_state,
+            verbose=0,
+        )
+        logger.info(
+            "CatBoostBaseline initialized: iterations=%d, depth=%d, lr=%.3f",
+            n_estimators, max_depth, learning_rate,
+        )
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
+        """Fits the model on training data.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+            y: Target labels of shape (n_samples,).
+        """
+        self.model.fit(X, y)
+        logger.info("CatBoostBaseline fitted on %d samples", len(y))
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predicts class labels.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+
+        Returns:
+            Predicted labels of shape (n_samples,).
+        """
+        return self.model.predict(X).flatten().astype(int)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predicts class probabilities.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+
+        Returns:
+            Class probabilities of shape (n_samples, n_classes).
+        """
+        return self.model.predict_proba(X)
+
+
+class TabPFNBaseline:
+    """TabPFN foundation model baseline (best for small datasets <10K).
+
+    Wraps ``tabpfn.TabPFNClassifier``, a pre-trained transformer that
+    performs in-context learning on tabular data without explicit training.
+
+    Attributes:
+        model: Underlying TabPFNClassifier instance.
+    """
+
+    def __init__(self, random_state: int = 42) -> None:
+        """Initializes the TabPFNBaseline.
+
+        Args:
+            random_state: Random seed for reproducibility.
+        """
+        from tabpfn import TabPFNClassifier
+
+        self.model = TabPFNClassifier(random_state=random_state)
+        logger.info("TabPFNBaseline initialized: random_state=%d", random_state)
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
+        """Fits the model on training data.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+            y: Target labels of shape (n_samples,).
+        """
+        self.model.fit(X, y)
+        logger.info("TabPFNBaseline fitted on %d samples", len(y))
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predicts class labels.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+
+        Returns:
+            Predicted labels of shape (n_samples,).
+        """
+        return self.model.predict(X)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Predicts class probabilities.
+
+        Args:
+            X: Feature matrix of shape (n_samples, n_features).
+
+        Returns:
+            Class probabilities of shape (n_samples, n_classes).
+        """
+        return self.model.predict_proba(X)

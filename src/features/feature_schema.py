@@ -49,11 +49,10 @@ CONTEXT_NAMES: List[str] = [
     "context_confidence",
 ]
 
-# network_out is intentionally excluded to keep N_FEATURES=36.  Adding it
+# network_out is intentionally excluded from statistical features.  Adding it
 # would change the statistical group from 13 to 15 features (mean + std +
-# max_error_rate), requiring updates to input_dim=36 across the model,
-# trainer, ablation script, and config.  network_in alone captures the
-# dominant network traffic signal for anomaly attribution.
+# max_error_rate).  network_in alone captures the dominant network traffic
+# signal for anomaly attribution.
 STAT_METRIC_COLS: List[str] = [
     "cpu_usage",
     "memory_usage",

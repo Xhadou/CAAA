@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class FeatureEncoder(nn.Module):
-    """Encodes the 36-dimensional feature vector into a dense hidden
+    """Encodes the 44-dimensional feature vector into a dense hidden
     representation via a multi-layer perceptron.
 
     Note: despite operating on features derived from time series, this

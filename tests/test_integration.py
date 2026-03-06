@@ -29,10 +29,10 @@ class TestEndToEndPipeline:
         all_cases = fault_cases + load_cases
         labels = np.array([0] * len(fault_cases) + [1] * len(load_cases))
 
-        # 2. Extract features (should be shape (10, 36))
+        # 2. Extract features (should be shape (10, 44))
         extractor = FeatureExtractor()
         X = extractor.extract_batch(all_cases).astype(np.float32)
-        assert X.shape == (10, 36)
+        assert X.shape == (10, 44)
         assert np.all(np.isfinite(X))
 
         # 3. Split 80/20

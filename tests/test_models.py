@@ -116,7 +116,7 @@ class TestCAAAModel:
     def test_model_handles_various_batch_sizes(self, caaa_model):
         caaa_model.eval()
         for bs in [1, 8, 32]:
-            x = torch.randn(bs, 36)
+            x = torch.randn(bs, 44)
             logits = caaa_model(x)
             assert logits.shape == (bs, 2)
             preds = caaa_model.predict(x)

@@ -32,8 +32,8 @@ CAAA uses an optional two-stage pipeline:
  Metrics ──► [Stage 1] ──►  ┌───────────┐  ┌───────────┐  ┌──────────┐  │
  (optional   Anomaly      │ │  Feature  │─►│ Context   │─►│ Classif. │──► FAULT / EXPECTED_LOAD / UNKNOWN
   LSTM-AE)   Detection    │ │  Encoder  │  │ Module    │  │   Head   │  │
-                          │ │  (MLP)    │  │(Attn+Gate)│  │          │  │
-                          │ │ 36d → 64d │  │ 5 context │  │ 2-class  │  │
+                          │ │(MLP+LN)  │  │(FiLM+Gate)│  │  (GELU)  │  │
+                          │ │ 44d → 64d │  │ 5 context │  │ 2-class  │  │
                           └─────────────────────────────────────────────┘
 ```
 
@@ -43,18 +43,24 @@ CAAA uses an optional two-stage pipeline:
 
 | Component | Description |
 |-----------|-------------|
-| **Feature Encoder** | 2-layer MLP projecting 36-dim feature vectors into 64-dim hidden representations |
-| **Context Integration Module** | Attention mechanism over 5 context features with learned confidence gating to modulate context influence |
+| **Feature Encoder** | 2-layer MLP with LayerNorm and GELU, projecting 44-dim feature vectors into 64-dim representations |
+| **Context Integration Module** | FiLM (Feature-wise Linear Modulation) conditioning with enriched confidence gating (3-feature gate) |
 | **Classification Head** | 2-class output (FAULT vs EXPECTED_LOAD) with post-hoc UNKNOWN assignment via confidence thresholding |
 
+**Training methodology:**
+- 3-way stratified split (60% train / 20% val / 20% test) — validation for early stopping and calibration, test for final metrics only
+- AdamW optimizer with ReduceLROnPlateau scheduler and gradient clipping (max_norm=1.0)
+- StandardScaler normalization for neural models (tree baselines use raw features)
+- GPU auto-detection (`--device auto|cpu|cuda`)
+
 **Context Consistency Loss** combines three terms:
-- Cross-entropy classification loss
-- Context consistency penalty — penalizes predictions that contradict available context signals (e.g., classifying as FAULT when a scheduled load event is active)
+- Cross-entropy classification loss (with label smoothing 0.1)
+- Context consistency penalty — penalizes predictions that contradict available context signals, weighted by confidence² for softer penalty on ambiguous cases
 - Confidence calibration loss — entropy regularization guided by context confidence scores
 
 ## Feature Vector
 
-The system extracts a 36-dimensional feature vector organized into 5 groups, defined centrally in `src/features/feature_schema.py`:
+The system extracts a 44-dimensional feature vector organized into 6 groups, defined centrally in `src/features/feature_schema.py`:
 
 | Group | Dims | Features | Purpose |
 |-------|------|----------|---------|
@@ -63,6 +69,7 @@ The system extracts a 36-dimensional feature vector organized into 5 groups, def
 | **Context** | 12–16 | `event_active`, `event_expected_impact`, `time_seasonality`, `recent_deployment`, `context_confidence` | External context signals (the key innovation) |
 | **Statistical** | 17–29 | Mean/std of CPU, memory, requests, errors, latency, network; `max_error_rate` | Standard metric statistics |
 | **Service-Level** | 30–35 | `n_services`, `max_cpu_service_ratio`, `max_error_service_ratio`, `cpu_spread`, `error_spread`, `latency_spread` | Cross-service aggregation patterns |
+| **Extended** | 36–43 | `spectral_entropy`, `high_freq_energy_ratio`, `dominant_frequency`, `network_asymmetry`, `graph_anomaly_centrality`, `anomaly_spread`, `max_cpu_derivative`, `error_rate_slope` | Frequency-domain, graph-structural, and rate-of-change features |
 
 ## Performance Targets
 
@@ -89,7 +96,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Requirements:** Python 3.9+, PyTorch 2.0+, scikit-learn 1.3+, NumPy, Pandas, SciPy, XGBoost, SHAP, ruptures, Matplotlib, Seaborn, PyYAML.
+**Requirements:** Python 3.9+, PyTorch 2.6+, scikit-learn 1.3+, NumPy, Pandas, SciPy, XGBoost, LightGBM, CatBoost, SHAP, ruptures, Matplotlib, Seaborn, PyYAML.
 
 ## Quick Start
 
@@ -184,7 +191,7 @@ CAAA/
 │   │   ├── download_data.py        # RCAEval dataset downloader
 │   │   └── rcaeval_loader.py       # RCAEval dataset parser
 │   ├── features/
-│   │   ├── feature_schema.py       # Single source of truth for 36-dim layout
+│   │   ├── feature_schema.py       # Single source of truth for 44-dim layout
 │   │   ├── extractors.py           # Feature extraction from raw metrics
 │   │   └── context_features.py     # Context feature computation
 │   ├── models/
@@ -193,7 +200,7 @@ CAAA/
 │   │   ├── context_module.py       # Context integration with attention & gating
 │   │   ├── anomaly_detector.py     # LSTM autoencoder for pre-stage detection
 │   │   ├── classifier.py          # Multi-backend sklearn classifier
-│   │   └── baseline.py            # RandomForest, XGBoost, rule-based baselines
+│   │   └── baseline.py            # RF, XGBoost, LightGBM, CatBoost, TabPFN baselines
 │   ├── training/
 │   │   ├── losses.py              # Context Consistency Loss (novel)
 │   │   └── trainer.py             # PyTorch training harness with early stopping
@@ -246,7 +253,7 @@ All model and training parameters are configurable via `configs/config.yaml`. Ke
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `model.caaa_model.input_dim` | 36 | Feature vector dimensionality |
+| `model.caaa_model.input_dim` | 44 | Feature vector dimensionality |
 | `model.caaa_model.hidden_dim` | 64 | Hidden layer size |
 | `model.caaa_model.context_dim` | 5 | Number of context features |
 | `training.epochs` | 50 | Training epochs |
@@ -254,6 +261,13 @@ All model and training parameters are configurable via `configs/config.yaml`. Ke
 | `training.early_stopping_patience` | 10 | Early stopping patience |
 | `evaluation.fp_reduction_target` | 0.40 | Target false positive reduction |
 | `evaluation.fault_recall_target` | 0.90 | Target fault recall |
+
+## Known Limitations
+
+- **No GNN component**: The architecture uses feature-level graph information (service adjacency, anomaly centrality) but does not include a full Graph Neural Network for structural reasoning over the service topology.
+- **Synthetic data caveats**: While the synthetic data generator produces realistic fault patterns (AR(1) autocorrelation, per-service baselines, load jitter), it cannot capture all real-world failure modes. RCAEval benchmark evaluation helps validate on real traces.
+- **Small dataset regime**: With typical dataset sizes <10K samples, deep learning baselines may not reach their full potential. TabPFN is included as a foundation model baseline designed for this regime.
+- **Binary classification**: The model classifies as FAULT vs EXPECTED_LOAD (with post-hoc UNKNOWN). Multi-class fault type classification is out of scope.
 
 ## Citation
 

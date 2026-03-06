@@ -4,7 +4,16 @@ import logging
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from scipy.stats import chi2
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from sklearn.model_selection import StratifiedKFold
 
 logger = logging.getLogger(__name__)
@@ -80,6 +89,7 @@ def compute_all_metrics(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     baseline_fp_rate: Optional[float] = None,
+    y_proba: Optional[np.ndarray] = None,
 ) -> Dict[str, float]:
     """Computes all evaluation metrics.
 
@@ -93,6 +103,8 @@ def compute_all_metrics(
         y_pred: Predicted labels (values in {0, 1, 2}).
         baseline_fp_rate: Optional baseline false positive rate for
             computing FP reduction.
+        y_proba: Optional predicted probabilities for the positive class,
+            used to compute PR-AUC and ROC-AUC.
 
     Returns:
         Dictionary with:
@@ -100,11 +112,15 @@ def compute_all_metrics(
             - precision: Weighted precision (on known predictions only).
             - recall: Weighted recall (on known predictions only).
             - f1: Weighted F1 score (on known predictions only).
+            - f1_macro: Macro F1 score (on known predictions only).
+            - mcc: Matthews Correlation Coefficient (on known predictions only).
             - fp_rate: False positive rate for FAULT class.
             - fault_recall: Recall for the fault class.
             - fp_reduction: FP reduction vs baseline (if baseline_fp_rate provided).
             - attribution_accuracy: Same as accuracy.
             - unknown_rate: Fraction of predictions that are UNKNOWN.
+            - pr_auc: PR-AUC (if y_proba provided).
+            - roc_auc: ROC-AUC (if y_proba provided).
     """
     unknown_mask = y_pred == 2
     unknown_rate = float(unknown_mask.sum()) / len(y_pred) if len(y_pred) > 0 else 0.0
@@ -122,16 +138,24 @@ def compute_all_metrics(
         f1 = f1_score(
             y_true_known, y_pred_known, average="weighted", zero_division=0
         )
+        f1_macro = f1_score(
+            y_true_known, y_pred_known, average="macro", zero_division=0
+        )
+        mcc = matthews_corrcoef(y_true_known, y_pred_known)
     else:
         precision = 0.0
         recall = 0.0
         f1 = 0.0
+        f1_macro = 0.0
+        mcc = 0.0
 
     metrics: Dict[str, float] = {
         "accuracy": accuracy_score(y_true, y_pred),
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "f1_macro": f1_macro,
+        "mcc": mcc,
         "fp_rate": compute_false_positive_rate(y_true, y_pred),
         "fault_recall": compute_fault_recall(y_true, y_pred),
         "unknown_rate": unknown_rate,
@@ -141,6 +165,16 @@ def compute_all_metrics(
         metrics["fp_reduction"] = compute_false_positive_reduction(
             baseline_fp_rate, metrics["fp_rate"]
         )
+
+    if y_proba is not None:
+        try:
+            metrics["pr_auc"] = average_precision_score(y_true, y_proba)
+        except (ValueError, IndexError):
+            pass
+        try:
+            metrics["roc_auc"] = roc_auc_score(y_true, y_proba)
+        except (ValueError, IndexError):
+            pass
 
     metrics["attribution_accuracy"] = metrics["accuracy"]
 
@@ -162,6 +196,8 @@ def print_evaluation_summary(metrics: Dict[str, float]) -> None:
         f"  Precision (weighted): {metrics.get('precision', 0.0):.4f}",
         f"  Recall (weighted):    {metrics.get('recall', 0.0):.4f}",
         f"  F1 (weighted):        {metrics.get('f1', 0.0):.4f}",
+        f"  F1 (macro):           {metrics.get('f1_macro', 0.0):.4f}",
+        f"  MCC:                  {metrics.get('mcc', 0.0):.4f}",
         "-" * 50,
         f"  False Positive Rate:  {metrics.get('fp_rate', 0.0):.4f}",
         f"  Fault Recall:         {metrics.get('fault_recall', 0.0):.4f}",
@@ -170,6 +206,16 @@ def print_evaluation_summary(metrics: Dict[str, float]) -> None:
     if "fp_reduction" in metrics:
         summary_lines.append(
             f"  FP Reduction:         {metrics['fp_reduction']:.4f}"
+        )
+
+    if "pr_auc" in metrics:
+        summary_lines.append(
+            f"  PR-AUC:               {metrics['pr_auc']:.4f}"
+        )
+
+    if "roc_auc" in metrics:
+        summary_lines.append(
+            f"  ROC-AUC:              {metrics['roc_auc']:.4f}"
         )
 
     summary_lines.append("=" * 50)
@@ -271,3 +317,76 @@ def compute_expected_calibration_error(
     ece = float(np.sum(bin_counts / total * np.abs(bin_accuracies - bin_confidences)))
 
     return ece, bin_accuracies, bin_confidences, bin_counts
+
+
+def mcnemar_test(
+    y_true: np.ndarray, y_pred_a: np.ndarray, y_pred_b: np.ndarray
+) -> dict:
+    """Compute McNemar's test for comparing two classifiers.
+
+    Builds a 2x2 contingency table of correct/incorrect predictions for
+    classifiers A and B, then computes the chi-squared statistic with
+    continuity correction.
+
+    Args:
+        y_true: Ground truth labels.
+        y_pred_a: Predictions from classifier A.
+        y_pred_b: Predictions from classifier B.
+
+    Returns:
+        Dictionary with keys: chi2, p_value, n01, n10 where
+        n01 = count(A wrong, B right) and n10 = count(A right, B wrong).
+    """
+    correct_a = (y_pred_a == y_true)
+    correct_b = (y_pred_b == y_true)
+
+    n01 = int((~correct_a & correct_b).sum())  # A wrong, B right
+    n10 = int((correct_a & ~correct_b).sum())   # A right, B wrong
+
+    if n01 + n10 == 0:
+        return {"chi2": 0.0, "p_value": 1.0, "n01": n01, "n10": n10}
+
+    chi2_stat = (abs(n01 - n10) - 1) ** 2 / (n01 + n10)
+    p_value = float(chi2.sf(chi2_stat, df=1))
+
+    return {"chi2": float(chi2_stat), "p_value": p_value, "n01": n01, "n10": n10}
+
+
+def bootstrap_ci(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    metric_fn: Callable[[np.ndarray, np.ndarray], float],
+    n_bootstrap: int = 1000,
+    confidence: float = 0.95,
+    seed: int = 42,
+) -> Tuple[float, float, float]:
+    """Compute a bootstrap confidence interval for a metric.
+
+    Samples with replacement from (y_true, y_pred) pairs and computes
+    the metric on each bootstrap sample to estimate the CI.
+
+    Args:
+        y_true: Ground truth labels.
+        y_pred: Predicted labels.
+        metric_fn: A callable taking (y_true, y_pred) and returning a float.
+        n_bootstrap: Number of bootstrap iterations.
+        confidence: Confidence level (e.g. 0.95 for 95% CI).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Tuple of (point_estimate, ci_lower, ci_upper).
+    """
+    rng = np.random.RandomState(seed)
+    n = len(y_true)
+    point_estimate = metric_fn(y_true, y_pred)
+
+    bootstrap_scores = np.empty(n_bootstrap)
+    for i in range(n_bootstrap):
+        indices = rng.randint(0, n, size=n)
+        bootstrap_scores[i] = metric_fn(y_true[indices], y_pred[indices])
+
+    alpha = 1.0 - confidence
+    ci_lower = float(np.percentile(bootstrap_scores, 100 * (alpha / 2)))
+    ci_upper = float(np.percentile(bootstrap_scores, 100 * (1 - alpha / 2)))
+
+    return (point_estimate, ci_lower, ci_upper)

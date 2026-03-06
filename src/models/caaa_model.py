@@ -74,7 +74,7 @@ class CAAAModel(nn.Module):
 
         Args:
             x: Input tensor of shape (batch, input_dim) containing
-                the full 36-dim feature vector.
+                the full 44-dim feature vector.
 
         Returns:
             Logits tensor of shape (batch, n_classes).
