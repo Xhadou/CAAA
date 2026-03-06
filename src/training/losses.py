@@ -72,11 +72,12 @@ class ContextConsistencyLoss(nn.Module):
         load_prob = probs[:, 1]
         penalty_when_no_event = (1.0 - event_active) * load_prob
 
-        # Weight by context_confidence so that corrupted/unreliable context
-        # (10% of faults with fake events, 15% of loads without events)
-        # contributes little to the penalty.
+        # Weight by context_confidence squared so that corrupted/unreliable
+        # context (30% of faults with fake events, 30% of loads without
+        # events) contributes very little to the penalty.  Squaring makes
+        # the penalty softer for ambiguous cases (confidence ~0.3-0.5).
         per_sample_penalty = penalty_when_event + penalty_when_no_event
-        consistency_loss = torch.mean(context_confidence * per_sample_penalty)
+        consistency_loss = torch.mean(context_confidence ** 2 * per_sample_penalty)
 
         # 3. Confidence calibration loss
         # When context_confidence is high, penalize high entropy (uncertainty)

@@ -24,6 +24,7 @@ from src.evaluation.metrics import (
     compute_false_positive_rate,
     print_evaluation_summary,
 )
+from src.utils import set_seed, resolve_device
 
 
 def main():
@@ -68,6 +69,9 @@ def main():
                         help="Anomaly detector training epochs")
     parser.add_argument("--ad-threshold", type=float, default=95,
                         help="Anomaly detector threshold percentile")
+    parser.add_argument("--device", type=str, default="auto",
+                        choices=["auto", "cpu", "cuda"],
+                        help="Device for training (auto detects CUDA)")
 
     args = parser.parse_args()
 
@@ -87,8 +91,8 @@ def main():
         if args.systems == ["online-boutique"]:
             args.systems = data_cfg.get("systems", args.systems)
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    set_seed(args.seed)
+    device = resolve_device(args.device if hasattr(args, 'device') else "auto")
 
     print("=" * 50)
     print("CAAA TRAINING")
@@ -139,28 +143,33 @@ def main():
     X = extractor.extract_batch(all_cases).astype(np.float32)
     print(f"Features: {X.shape}")
 
-    # Split
-    X_train, X_test, y_train, y_test = train_test_split(
+    # Split (3-way: train/val/test to prevent data leakage)
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, labels, test_size=0.2, random_state=args.seed, stratify=labels,
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=0.25, random_state=args.seed,
+        stratify=y_trainval,
     )
 
     # Scale features (fit on train only) for neural models
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
+    X_val = scaler.transform(X_val)
     X_test = scaler.transform(X_test)
 
     # Train CAAA model
     print(f"Training CAAA model for {args.epochs} epochs...")
     model = CAAAModel(input_dim=36)
-    trainer = CAAATrainer(model, learning_rate=args.lr, device="cpu")
+    trainer = CAAATrainer(model, learning_rate=args.lr, device=device)
     trainer.train(
-        X_train, y_train, X_val=X_test, y_val=y_test,
+        X_train, y_train, X_val=X_val, y_val=y_val,
         epochs=args.epochs, batch_size=args.batch_size,
         early_stopping_patience=10,
     )
 
-    # Post-hoc temperature calibration on validation set
-    trainer.calibrate_temperature(X_test, y_test)
+    # Post-hoc temperature calibration on validation set (NOT test)
+    trainer.calibrate_temperature(X_val, y_val)
 
     # Evaluate CAAA
     caaa_pred = trainer.predict(X_test)

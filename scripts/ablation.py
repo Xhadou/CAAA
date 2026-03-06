@@ -9,6 +9,7 @@ import sys
 import numpy as np
 import torch
 from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.preprocessing import StandardScaler
 
 # Fallback for running without `pip install -e .`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -21,6 +22,7 @@ from src.evaluation.metrics import (
     compute_all_metrics,
     compute_false_positive_rate,
 )
+from src.utils import set_seed, resolve_device
 
 
 def run_caaa_variant(
@@ -49,7 +51,7 @@ def run_caaa_variant(
     torch.manual_seed(seed)
     model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
     trainer = CAAATrainer(
-        model, learning_rate=lr, device="cpu",
+        model, learning_rate=lr,
         use_context_loss=use_context_loss,
         loss_type=loss_type,
     )
@@ -202,8 +204,7 @@ def main():
         if not use_cv:
             print(f"\n--- Run {run_idx + 1}/{args.n_runs} (seed={run_seed}) ---")
 
-        np.random.seed(run_seed if not use_cv else args.base_seed)
-        torch.manual_seed(run_seed if not use_cv else args.base_seed)
+        set_seed(run_seed if not use_cv else args.base_seed)
 
         # Generate dataset
         if args.data == "rcaeval":
@@ -244,13 +245,18 @@ def main():
             if use_cv:
                 print(f"\n--- Fold {fold_idx + 1}/{args.cv_folds} ---")
 
-            X_train, X_test = X[train_idx], X[test_idx]
+            X_train_raw, X_test_raw = X[train_idx], X[test_idx]
             y_train, y_test = labels[train_idx], labels[test_idx]
             fault_types_test = fault_types_all[test_idx]
 
+            # Scale features for CAAA variants (fit on train only)
+            scaler = StandardScaler()
+            X_train = scaler.fit_transform(X_train_raw)
+            X_test = scaler.transform(X_test_raw)
+
             # Naive baseline FP rate
             naive = NaiveBaseline()
-            naive_pred = naive.predict(X_test)
+            naive_pred = naive.predict(X_test_raw)
             naive_fp = compute_false_positive_rate(y_test, naive_pred)
 
             # --- Full CAAA ---
@@ -361,27 +367,27 @@ def main():
             for k in metrics_to_track:
                 all_results["Stat + Service-Level"][k].append(m.get(k, 0.0))
 
-            # --- Baseline RF ---
+            # --- Baseline RF (raw features — tree models don't need scaling) ---
             print("  Baseline RF...")
-            m = run_baseline_rf(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
+            m = run_baseline_rf(X_train_raw, y_train, X_test_raw, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["Baseline RF"][k].append(m.get(k, 0.0))
 
-            # --- XGBoost ---
+            # --- XGBoost (raw features) ---
             print("  XGBoost...")
-            m = run_xgboost(X_train, y_train, X_test, y_test, naive_fp, seed=run_seed)
+            m = run_xgboost(X_train_raw, y_train, X_test_raw, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["XGBoost"][k].append(m.get(k, 0.0))
 
-            # --- Rule-Based ---
+            # --- Rule-Based (raw features) ---
             print("  Rule-Based...")
-            m = run_rule_based(X_train, y_train, X_test, y_test, naive_fp)
+            m = run_rule_based(X_train_raw, y_train, X_test_raw, y_test, naive_fp)
             for k in metrics_to_track:
                 all_results["Rule-Based"][k].append(m.get(k, 0.0))
 
-            # --- Naive ---
+            # --- Naive (raw features) ---
             print("  Naive...")
-            m = run_naive(X_test, y_test, naive_fp)
+            m = run_naive(X_test_raw, y_test, naive_fp)
             for k in metrics_to_track:
                 all_results["Naive"][k].append(m.get(k, 0.0))
 
@@ -426,7 +432,7 @@ def main():
     torch.manual_seed(args.base_seed)
     _ft_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
     _ft_trainer = CAAATrainer(
-        _ft_model, learning_rate=args.lr, device="cpu",
+        _ft_model, learning_rate=args.lr,
         use_context_loss=True,
     )
     _ft_trainer.train(
@@ -504,7 +510,7 @@ def main():
         torch.manual_seed(args.base_seed)
         caaa_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
         caaa_trainer = CAAATrainer(
-            caaa_model, learning_rate=args.lr, device="cpu",
+            caaa_model, learning_rate=args.lr,
             use_context_loss=True,
         )
         caaa_trainer.train(
@@ -536,7 +542,7 @@ def main():
         torch.manual_seed(args.base_seed)
         cal_model = CAAAModel(input_dim=36, hidden_dim=64, n_classes=2)
         cal_trainer = CAAATrainer(
-            cal_model, learning_rate=args.lr, device="cpu",
+            cal_model, learning_rate=args.lr,
             use_context_loss=True,
         )
         cal_trainer.train(

@@ -20,6 +20,7 @@ from src.features import FeatureExtractor
 from src.models import CAAAModel, NaiveBaseline
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import compute_all_metrics, compute_false_positive_rate
+from src.utils import set_seed
 
 
 def main():
@@ -45,8 +46,7 @@ def main():
         if args.epochs == 30:
             args.epochs = training_cfg.get("epochs", args.epochs)
 
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    set_seed(args.seed)
 
     print("=" * 50)
     print("CAAA DEMO - Context-Aware Anomaly Attribution")
@@ -67,22 +67,27 @@ def main():
     X = extractor.extract_batch(all_cases).astype(np.float32)
     print(f"  Feature matrix: {X.shape}")
 
-    # Split
-    X_train, X_test, y_train, y_test = train_test_split(
+    # Split (3-way: train/val/test to prevent data leakage)
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, labels, test_size=0.2, random_state=args.seed, stratify=labels
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=0.25, random_state=args.seed,
+        stratify=y_trainval,
     )
 
     # Scale features (fit on train only) for neural models
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
+    X_val = scaler.transform(X_val)
     X_test = scaler.transform(X_test)
 
     # Train CAAA model
     print("Training CAAA model...")
     model = CAAAModel(input_dim=36)
-    trainer = CAAATrainer(model, learning_rate=0.001, device="cpu")
+    trainer = CAAATrainer(model, learning_rate=0.001)
     trainer.train(
-        X_train, y_train, X_val=X_test, y_val=y_test,
+        X_train, y_train, X_val=X_val, y_val=y_val,
         epochs=args.epochs, batch_size=16, early_stopping_patience=10,
     )
 

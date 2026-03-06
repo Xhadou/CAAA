@@ -1,6 +1,8 @@
 """Load and parse RCAEval dataset format."""
 
 import json
+import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -80,6 +82,77 @@ class RCAEvalLoader:
         return None, None
 
     # ------------------------------------------------------------------
+    # Wide-format parsing
+    # ------------------------------------------------------------------
+
+    # Known metric suffixes in RCAEval wide-format CSVs
+    _KNOWN_METRICS = {
+        "cpu_usage", "memory_usage", "request_rate", "error_rate",
+        "latency", "network_in", "network_out",
+    }
+
+    @classmethod
+    def parse_wide_format(cls, df: pd.DataFrame) -> List[ServiceMetrics]:
+        """Parse wide-format metrics into per-service ServiceMetrics.
+
+        Column names matching ``{service}_{metric}`` are split into
+        separate DataFrames per unique service prefix.  Falls back to a
+        single ServiceMetrics wrapping the entire DataFrame if no
+        columns match the pattern.
+
+        Args:
+            df: Wide-format metrics DataFrame.
+
+        Returns:
+            List of ``ServiceMetrics``, one per detected service.
+        """
+        service_cols: Dict[str, List[str]] = defaultdict(list)
+        unmatched: List[str] = []
+
+        for col in df.columns:
+            if col.lower() in ("timestamp", "time", "ts"):
+                continue
+            # Try to split as service_metric
+            matched = False
+            for metric in cls._KNOWN_METRICS:
+                if col.endswith(f"_{metric}"):
+                    svc_name = col[: -(len(metric) + 1)]
+                    service_cols[svc_name].append((col, metric))
+                    matched = True
+                    break
+            if not matched:
+                unmatched.append(col)
+
+        if not service_cols:
+            # No service_metric pattern found — fall back to single entry
+            return [ServiceMetrics(service_name="unknown", metrics=df)]
+
+        # Build per-service DataFrames
+        timestamp_col = None
+        for candidate in ("timestamp", "time", "ts"):
+            if candidate in df.columns:
+                timestamp_col = candidate
+                break
+
+        results: List[ServiceMetrics] = []
+        for svc_name, col_pairs in sorted(service_cols.items()):
+            svc_df_data: Dict[str, object] = {}
+            if timestamp_col:
+                svc_df_data["timestamp"] = df[timestamp_col].values
+            else:
+                svc_df_data["timestamp"] = range(len(df))
+            for orig_col, metric in col_pairs:
+                svc_df_data[metric] = df[orig_col].values
+            # Fill missing standard metrics with zeros
+            for metric in cls._KNOWN_METRICS:
+                if metric not in svc_df_data:
+                    svc_df_data[metric] = 0.0
+            svc_df = pd.DataFrame(svc_df_data)
+            results.append(ServiceMetrics(service_name=svc_name, metrics=svc_df))
+
+        return results
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
@@ -91,8 +164,9 @@ class RCAEvalLoader:
     ) -> List[AnomalyCase]:
         """Load all failure cases from a dataset.
 
-        Each case is returned as an :class:`AnomalyCase` with a single
-        ``ServiceMetrics`` entry holding the wide-format metrics.
+        Parses wide-format metrics into per-service ServiceMetrics when
+        column names match the ``{service}_{metric}`` pattern.  Falls
+        back to a single ServiceMetrics entry otherwise.
 
         Args:
             dataset: ``"RE1"``, ``"RE2"``, or ``"RE3"``.
@@ -119,12 +193,14 @@ class RCAEvalLoader:
             if metrics.empty:
                 continue
 
-            svc = ServiceMetrics(service_name=info["service"], metrics=metrics)
+            # Parse wide-format into per-service metrics
+            services = self.parse_wide_format(metrics)
+
             case = AnomalyCase(
                 case_id=case_dir.name,
                 system=info["system"],
                 label="FAULT",
-                services=[svc],
+                services=services,
                 fault_service=info["service"],
                 fault_type=info["fault_type"],
             )

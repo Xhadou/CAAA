@@ -204,7 +204,8 @@ class AnomalyDetector:
 
     def compute_reconstruction_errors(self, data: np.ndarray) -> np.ndarray:
         """Compute per-window reconstruction error."""
-        assert self.model is not None
+        if self.model is None:
+            raise RuntimeError("Model not trained yet — call fit() first.")
         self.model.eval()
         errors: List[float] = []
         with torch.no_grad():
@@ -230,10 +231,12 @@ class AnomalyDetector:
     # ------------------------------------------------------------------
 
     def save(self, path: str) -> None:
-        assert self.model is not None
+        if self.model is None:
+            raise RuntimeError("Model not trained yet — call fit() first.")
         torch.save({
             "model_state": self.model.state_dict(),
-            "scaler": self.scaler,
+            "scaler_mean": self.scaler.mean_,
+            "scaler_scale": self.scaler.scale_,
             "threshold": self.threshold,
             "config": {
                 "hidden_dim": self.hidden_dim,
@@ -244,7 +247,7 @@ class AnomalyDetector:
         }, path)
 
     def load(self, path: str, n_features: int) -> None:
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         cfg = checkpoint["config"]
         self.model = LSTMAutoencoder(
             n_features=n_features,
@@ -253,5 +256,9 @@ class AnomalyDetector:
             num_layers=cfg["num_layers"],
         ).to(self.device)
         self.model.load_state_dict(checkpoint["model_state"])
-        self.scaler = checkpoint["scaler"]
+        self.scaler = StandardScaler()
+        self.scaler.mean_ = checkpoint["scaler_mean"].numpy() if isinstance(checkpoint["scaler_mean"], torch.Tensor) else checkpoint["scaler_mean"]
+        self.scaler.scale_ = checkpoint["scaler_scale"].numpy() if isinstance(checkpoint["scaler_scale"], torch.Tensor) else checkpoint["scaler_scale"]
+        self.scaler.var_ = self.scaler.scale_ ** 2
+        self.scaler.n_features_in_ = n_features
         self.threshold = checkpoint["threshold"]

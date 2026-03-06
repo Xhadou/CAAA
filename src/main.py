@@ -43,6 +43,7 @@ from src.evaluation.metrics import (
     cross_validate_model,
     print_evaluation_summary,
 )
+from src.utils import set_seed, resolve_device
 
 
 def _setup_logging(level: str = "INFO") -> None:
@@ -78,6 +79,8 @@ def run_pipeline(
     include_hard: bool = False,
     # Cross-validation
     cv_folds: int = 1,
+    # Device
+    device: str = "auto",
 ) -> dict:
     """Run the complete CAAA pipeline.
 
@@ -108,8 +111,8 @@ def run_pipeline(
     if systems is None:
         systems = ["online-boutique"]
 
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    set_seed(seed)
+    device = resolve_device(device)
 
     print("=" * 60)
     print("CAAA: Context-Aware Anomaly Attribution")
@@ -240,10 +243,14 @@ def run_pipeline(
         return model_metrics
 
     # ------------------------------------------------------------------
-    # Step 3: Split (single train/test)
+    # Step 3: Split (3-way train/val/test to prevent data leakage)
     # ------------------------------------------------------------------
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, labels, test_size=0.2, random_state=seed, stratify=labels,
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_trainval, y_trainval, test_size=0.25, random_state=seed,
+        stratify=y_trainval,
     )
 
     # Step 3b: Scale AFTER split (fit on train only) for neural models
@@ -252,6 +259,7 @@ def run_pipeline(
         print("  Applying StandardScaler (fit on train split only)...")
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X_train)
+        X_val = scaler.transform(X_val)
         X_test = scaler.transform(X_test)
 
     # ------------------------------------------------------------------
@@ -260,13 +268,13 @@ def run_pipeline(
     print(f"\n[3/5] Training {model_type} model...")
     if model_type == "caaa":
         model = CAAAModel(input_dim=X_train.shape[1])
-        trainer = CAAATrainer(model, learning_rate=learning_rate, device="cpu")
+        trainer = CAAATrainer(model, learning_rate=learning_rate, device=device)
         trainer.train(
-            X_train, y_train, X_val=X_test, y_val=y_test,
+            X_train, y_train, X_val=X_val, y_val=y_val,
             epochs=epochs, batch_size=batch_size, early_stopping_patience=10,
         )
-        # Post-hoc temperature calibration on validation set
-        trainer.calibrate_temperature(X_test, y_test)
+        # Post-hoc temperature calibration on validation set (NOT test)
+        trainer.calibrate_temperature(X_val, y_val)
         y_pred = trainer.predict(X_test)
     elif model_type == "xgboost":
         bl = XGBoostBaseline(random_state=seed)
@@ -343,6 +351,9 @@ def main() -> None:
                         help="Include hard/adversarial scenarios in dataset")
     parser.add_argument("--cv-folds", type=int, default=1,
                         help="Number of cross-validation folds (1 = single split)")
+    parser.add_argument("--device", type=str, default="auto",
+                        choices=["auto", "cpu", "cuda"],
+                        help="Device for training (auto detects CUDA)")
 
     # Data source
     parser.add_argument(
@@ -412,6 +423,7 @@ def main() -> None:
         ad_threshold_percentile=args.ad_threshold,
         include_hard=args.include_hard,
         cv_folds=args.cv_folds,
+        device=args.device,
     )
 
 

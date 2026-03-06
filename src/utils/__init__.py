@@ -1,6 +1,10 @@
 """Shared utility functions for the CAAA pipeline."""
 
+import random
 from typing import Dict
+
+import numpy as np
+import torch
 
 # ── Label constants ───────────────────────────────────────────────────
 
@@ -15,6 +19,33 @@ LABEL_TO_INT: Dict[str, int] = {
 }
 
 INT_TO_LABEL: Dict[int, str] = {v: k for k, v in LABEL_TO_INT.items()}
+
+
+def resolve_device(device: str = "auto") -> str:
+    """Resolve device string to a concrete device.
+
+    Args:
+        device: ``"auto"``, ``"cpu"``, or ``"cuda"``.
+
+    Returns:
+        ``"cuda"`` if available and requested, else ``"cpu"``.
+    """
+    if device == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return device
+
+
+def set_seed(seed: int) -> None:
+    """Set random seeds for reproducibility across all libraries.
+
+    Args:
+        seed: Random seed value.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def labels_to_int(labels, label_map=None):

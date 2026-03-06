@@ -11,6 +11,7 @@ import torch.nn as nn
 from src.features.feature_schema import CONTEXT_START as _CONTEXT_START, CONTEXT_END as _CONTEXT_END
 from src.models import CAAAModel
 from src.training.losses import ContextConsistencyLoss, SupConContextLoss
+from src.utils import resolve_device
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class CAAATrainer:
         model: CAAAModel,
         learning_rate: float = 0.001,
         weight_decay: float = 1e-4,
-        device: str = "cpu",
+        device: str = "auto",
         use_context_loss: bool = True,
         loss_type: str = "context_consistency",
     ) -> None:
@@ -47,7 +48,8 @@ class CAAATrainer:
             model: The CAAAModel to train.
             learning_rate: Learning rate for the Adam optimizer.
             weight_decay: Weight decay (L2 regularization) for the optimizer.
-            device: Device to run computations on ('cpu' or 'cuda').
+            device: Device to run computations on (``"auto"``, ``"cpu"``,
+                or ``"cuda"``).  ``"auto"`` selects CUDA when available.
             use_context_loss: Whether to use ContextConsistencyLoss.
                 Ignored when *loss_type* is explicitly set to a value other
                 than ``"context_consistency"``.
@@ -56,7 +58,7 @@ class CAAATrainer:
                 ``"contrastive"`` — SupConContextLoss.
                 ``"cross_entropy"`` — plain CrossEntropyLoss.
         """
-        self.device = device
+        self.device = resolve_device(device)
         self.model = model.to(self.device)
         self.loss_type = loss_type
 
@@ -492,7 +494,7 @@ class CAAATrainer:
         Args:
             path: File path to the checkpoint (.pt file).
         """
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         logger.info("Model loaded from %s", path)
