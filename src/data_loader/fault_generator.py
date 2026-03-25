@@ -89,6 +89,9 @@ class FaultGenerator:
     def _ar1_signal(self, length: int, lo: float, hi: float, phi: float = 0.9) -> np.ndarray:
         """Generate an AR(1) autocorrelated signal for realistic fault patterns.
 
+        Uses ``scipy.signal.lfilter`` for a vectorised IIR filter implementation
+        (runs in C) instead of a Python loop.
+
         Args:
             length: Number of timesteps.
             lo: Lower bound for random innovations.
@@ -98,11 +101,12 @@ class FaultGenerator:
         Returns:
             1-D array of length *length* with temporally correlated values.
         """
-        signal = np.zeros(length)
-        signal[0] = self.rng.uniform(lo, hi)
-        for t in range(1, length):
-            signal[t] = phi * signal[t - 1] + (1 - phi) * self.rng.uniform(lo, hi)
-        return signal
+        from scipy.signal import lfilter
+
+        innovations = self.rng.uniform(lo, hi, size=length)
+        # IIR filter: y[t] = (1-phi)*x[t] + phi*y[t-1]
+        # Transfer function: b=[1-phi], a=[1, -phi]
+        return lfilter([1 - phi], [1, -phi], innovations)
 
     def _base_metrics(self, service_name: str) -> pd.DataFrame:
         """Generate a DataFrame of normal-operation metrics for one service.

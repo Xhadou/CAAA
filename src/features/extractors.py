@@ -316,6 +316,14 @@ class FeatureExtractor:
         # Pre-extract CPU arrays once per service
         cpu_arrays = [svc.metrics["cpu_usage"].values for svc in services]
 
+        # Pre-compute per-array stats once (reused across features 8-12)
+        cpu_means = [np.mean(cpu) for cpu in cpu_arrays]
+        cpu_stds = [np.std(cpu) for cpu in cpu_arrays]
+        cpu_zscores = [
+            (cpu - mu) / std if std > 0 else np.zeros_like(cpu)
+            for cpu, mu, std in zip(cpu_arrays, cpu_means, cpu_stds)
+        ]
+
         # 7. onset_gradient (change-point-based abruptness via PELT)
         abruptness_values = []
         for cpu in cpu_arrays:
@@ -325,28 +333,21 @@ class FeatureExtractor:
 
         # 8. peak_duration
         durations = []
-        for cpu in cpu_arrays:
+        for i, cpu in enumerate(cpu_arrays):
             seq_len = len(cpu)
-            if seq_len == 0:
+            if seq_len == 0 or cpu_stds[i] == 0.0:
                 durations.append(0.0)
                 continue
-            std = np.std(cpu)
-            if std == 0.0:
-                durations.append(0.0)
-                continue
-            z = (cpu - np.mean(cpu)) / std
-            anom_count = int(np.sum(z > 2.0))
+            anom_count = int(np.sum(cpu_zscores[i] > 2.0))
             durations.append(anom_count / seq_len)
         peak_duration = float(np.mean(durations))
 
         # 9. cascade_score
         onset_times: List[float] = []
-        for cpu in cpu_arrays:
-            std = np.std(cpu)
-            if std == 0.0 or len(cpu) < 2:
+        for i, cpu in enumerate(cpu_arrays):
+            if cpu_stds[i] == 0.0 or len(cpu) < 2:
                 continue
-            z = (cpu - np.mean(cpu)) / std
-            anom_idx = np.where(z > 2.0)[0]
+            anom_idx = np.where(cpu_zscores[i] > 2.0)[0]
             if len(anom_idx) > 0:
                 onset_times.append(float(anom_idx[0]))
         if len(onset_times) < 2:
@@ -357,12 +358,12 @@ class FeatureExtractor:
 
         # 10. recovery_indicator
         recoveries = []
-        for cpu in cpu_arrays:
+        for i, cpu in enumerate(cpu_arrays):
             if len(cpu) < 4:
                 recoveries.append(0.0)
                 continue
             peak = np.max(cpu)
-            baseline = np.mean(cpu)
+            baseline = cpu_means[i]
             if peak <= baseline:
                 recoveries.append(0.0)
                 continue
@@ -372,11 +373,10 @@ class FeatureExtractor:
 
         # 11. affected_service_ratio
         affected = 0
-        for cpu in cpu_arrays:
-            std = np.std(cpu)
-            if std == 0.0:
+        for i in range(n):
+            if cpu_stds[i] == 0.0:
                 continue
-            z = (cpu - np.mean(cpu)) / std
+            z = cpu_zscores[i]
             if np.any(z > 2.0):
                 affected += 1
         affected_service_ratio = affected / n
@@ -579,30 +579,38 @@ class FeatureExtractor:
         # 1-3: Frequency-domain features (spectral_entropy, high_freq_energy_ratio, dominant_frequency)
         from scipy.signal import welch
 
-        entropies, hf_ratios, dom_freqs = [], [], []
+        # Batch services with equal-length CPU arrays for a single welch() call
+        cpu_by_len: Dict[int, List[np.ndarray]] = {}
+        short_count = 0
         for svc in services:
             cpu = svc.metrics["cpu_usage"].values
             if len(cpu) < 8:
-                entropies.append(0.0)
-                hf_ratios.append(0.0)
-                dom_freqs.append(0.0)
+                short_count += 1
                 continue
-            freqs, psd = welch(cpu, nperseg=min(len(cpu), 256))
-            # Spectral entropy
-            psd_norm = psd / (psd.sum() + 1e-10)
-            entropy = -np.sum(psd_norm * np.log2(psd_norm + 1e-10))
-            entropies.append(float(entropy))
-            # High frequency energy ratio (above Nyquist/2)
-            nyquist_half = len(freqs) // 2
-            hf_energy = psd[nyquist_half:].sum()
-            total_energy = psd.sum() + 1e-10
-            hf_ratios.append(float(hf_energy / total_energy))
-            # Dominant frequency
-            dom_freqs.append(float(freqs[np.argmax(psd)]))
+            cpu_by_len.setdefault(len(cpu), []).append(cpu)
 
-        spectral_entropy = float(np.mean(entropies))
-        high_freq_energy_ratio = float(np.mean(hf_ratios))
-        dominant_frequency = float(np.mean(dom_freqs))
+        entropies, hf_ratios, dom_freqs = (
+            [0.0] * short_count,
+            [0.0] * short_count,
+            [0.0] * short_count,
+        )
+        for length, arrays in cpu_by_len.items():
+            stacked = np.array(arrays)  # (n_svcs_with_len, length)
+            freqs, psd_batch = welch(stacked, nperseg=min(length, 256), axis=-1)
+            # psd_batch shape: (n_svcs, n_freqs)
+            total = psd_batch.sum(axis=1, keepdims=True) + 1e-10
+            psd_norm = psd_batch / total
+            ent = -np.sum(psd_norm * np.log2(psd_norm + 1e-10), axis=1)
+            nyquist_half = len(freqs) // 2
+            hf = psd_batch[:, nyquist_half:].sum(axis=1) / total.squeeze()
+            dom = freqs[np.argmax(psd_batch, axis=1)]
+            entropies.extend(ent.tolist())
+            hf_ratios.extend(hf.tolist())
+            dom_freqs.extend(dom.tolist())
+
+        spectral_entropy = float(np.mean(entropies)) if entropies else 0.0
+        high_freq_energy_ratio = float(np.mean(hf_ratios)) if hf_ratios else 0.0
+        dominant_frequency = float(np.mean(dom_freqs)) if dom_freqs else 0.0
 
         # 4: Network asymmetry
         asymmetries = []
@@ -619,23 +627,27 @@ class FeatureExtractor:
 
         svc_map = {s.service_name: s for s in services}
 
+        # Pre-compute cpu arrays and z-scores for graph features
+        ext_cpu_arrays = [svc.metrics["cpu_usage"].values for svc in services]
+        ext_zscores = [
+            (cpu - np.mean(cpu)) / (np.std(cpu) + 1e-10) if np.std(cpu) > 0 else np.zeros_like(cpu)
+            for cpu in ext_cpu_arrays
+        ]
+
         # graph_anomaly_centrality: degree-weighted anomaly score
         centrality_scores = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
-            z_score = (cpu - np.mean(cpu)) / (np.std(cpu) + 1e-10)
-            is_anomalous = float(np.any(z_score > 2.0))
+        for i, svc in enumerate(services):
+            is_anomalous = float(np.any(ext_zscores[i] > 2.0))
             degree = len(_SERVICE_ADJACENCY.get(svc.service_name, []))
             centrality_scores.append(is_anomalous * degree)
         graph_anomaly_centrality = float(np.mean(centrality_scores)) if centrality_scores else 0.0
 
         # anomaly_spread: std of pairwise correlations between anomalous neighbors
         anomalous_corrs = []
-        for svc in services:
-            cpu = svc.metrics["cpu_usage"].values
-            z = (cpu - np.mean(cpu)) / (np.std(cpu) + 1e-10)
-            if not np.any(z > 2.0):
+        for i, svc in enumerate(services):
+            if not np.any(ext_zscores[i] > 2.0):
                 continue
+            cpu = ext_cpu_arrays[i]
             neighbors = _SERVICE_ADJACENCY.get(svc.service_name, [])
             for nb_name in neighbors:
                 if nb_name in svc_map:

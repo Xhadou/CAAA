@@ -29,14 +29,39 @@ class RCAEvalLoader:
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def parse_case_name(case_name: str) -> Dict:
+    @classmethod
+    def parse_case_name(cls, case_name: str) -> Dict:
         """Parse case directory name.
 
-        Format: ``{system}_{service}_{fault}_{instance}``
-        Example: ``online-boutique_frontend_cpu_1``
+        Supports two formats:
+        - Long:  ``{system}_{service}_{fault}_{instance}``
+          e.g.   ``online-boutique_frontend_cpu_1``
+        - Short: ``{service}_{fault}``
+          e.g.   ``adservice_cpu``  (used in nested RCAEval layout)
         """
         parts = case_name.split("_")
+
+        # Short format: last part is fault type if it matches a known fault
+        if len(parts) == 2 and parts[-1] in cls.FAULT_TYPES:
+            return {
+                "system": "unknown",
+                "service": parts[0],
+                "fault_type": parts[1],
+                "instance": 0,
+            }
+
+        # Try to detect short format with multi-word service name
+        # e.g. "productcatalogservice_cpu"
+        for i, part in enumerate(parts):
+            if part in cls.FAULT_TYPES:
+                return {
+                    "system": "unknown",
+                    "service": "_".join(parts[:i]),
+                    "fault_type": part,
+                    "instance": int(parts[i + 1]) if i + 1 < len(parts) else 0,
+                }
+
+        # Long format fallback
         return {
             "system": parts[0],
             "service": parts[1] if len(parts) > 1 else "unknown",
@@ -49,13 +74,20 @@ class RCAEvalLoader:
         """Load the metrics CSV file from a case directory."""
         metrics_file = case_path / "metrics.csv"
         if not metrics_file.exists():
-            for f in case_path.glob("*.csv"):
-                if "metric" in f.name.lower():
-                    metrics_file = f
-                    break
+            # Also check for "data.csv" (common in RCAEval datasets)
+            data_csv = case_path / "data.csv"
+            if data_csv.exists():
+                metrics_file = data_csv
+            else:
+                for f in case_path.glob("*.csv"):
+                    if "metric" in f.name.lower() or f.name == "data.csv":
+                        metrics_file = f
+                        break
 
         if metrics_file.exists():
             df = pd.read_csv(metrics_file)
+            # Drop duplicate columns (e.g. second "time" column in RCAEval CSVs)
+            df = df.loc[:, ~df.columns.duplicated()]
             if "timestamp" not in df.columns and df.columns[0].lower() in ["time", "ts"]:
                 df = df.rename(columns={df.columns[0]: "timestamp"})
             return df
@@ -87,8 +119,27 @@ class RCAEvalLoader:
     # Wide-format parsing
     # ------------------------------------------------------------------
 
-    # Known metric suffixes in RCAEval wide-format CSVs
-    _KNOWN_METRICS = {
+    # Known metric suffixes in RCAEval wide-format CSVs.
+    # Maps raw suffix → standardised column name used by ServiceMetrics.
+    _METRIC_ALIASES: Dict[str, str] = {
+        # Standard names (synthetic generator format)
+        "cpu_usage": "cpu_usage",
+        "memory_usage": "memory_usage",
+        "request_rate": "request_rate",
+        "error_rate": "error_rate",
+        "latency": "latency",
+        "network_in": "network_in",
+        "network_out": "network_out",
+        # Short names used in RCAEval CSVs
+        "cpu": "cpu_usage",
+        "mem": "memory_usage",
+        "load": "request_rate",
+        "error": "error_rate",
+    }
+    _KNOWN_METRICS = set(_METRIC_ALIASES.keys())
+
+    # The canonical metric columns expected by downstream code
+    _STANDARD_METRICS = {
         "cpu_usage", "memory_usage", "request_rate", "error_rate",
         "latency", "network_in", "network_out",
     }
@@ -119,7 +170,8 @@ class RCAEvalLoader:
             for metric in cls._KNOWN_METRICS:
                 if col.endswith(f"_{metric}"):
                     svc_name = col[: -(len(metric) + 1)]
-                    service_cols[svc_name].append((col, metric))
+                    std_metric = cls._METRIC_ALIASES[metric]
+                    service_cols[svc_name].append((col, std_metric))
                     matched = True
                     break
             if not matched:
@@ -143,10 +195,10 @@ class RCAEvalLoader:
                 svc_df_data["timestamp"] = df[timestamp_col].values
             else:
                 svc_df_data["timestamp"] = range(len(df))
-            for orig_col, metric in col_pairs:
-                svc_df_data[metric] = df[orig_col].values
+            for orig_col, std_metric in col_pairs:
+                svc_df_data[std_metric] = df[orig_col].values
             # Fill missing standard metrics with zeros
-            for metric in cls._KNOWN_METRICS:
+            for metric in cls._STANDARD_METRICS:
                 if metric not in svc_df_data:
                     svc_df_data[metric] = 0.0
             svc_df = pd.DataFrame(svc_df_data)
@@ -183,11 +235,47 @@ class RCAEvalLoader:
             raise FileNotFoundError(f"Dataset not found: {dataset_path}")
 
         cases: List[AnomalyCase] = []
-        for case_dir in sorted(dataset_path.iterdir()):
-            if not case_dir.is_dir():
-                continue
 
-            info = self.parse_case_name(case_dir.name)
+        # Discover case directories.  The layout may be either:
+        #   <dataset_path>/<case_name>/metrics.csv          (flat)
+        #   <dataset_path>/<prefix>/<svc_fault>/<instance>/ (nested, e.g. RE1-OB/adservice_cpu/1/)
+        # We detect the nested layout by checking whether the first-level
+        # children themselves contain case-level sub-directories.
+        case_dirs: List[Path] = []
+        for child in sorted(dataset_path.iterdir()):
+            if not child.is_dir():
+                continue
+            # Check if this child is a nested prefix dir (contains dirs that
+            # themselves contain data files or numbered instance dirs).
+            # Avoid loading CSVs just for layout detection — check for files instead.
+            sub_dirs = [d for d in sorted(child.iterdir()) if d.is_dir()]
+            has_own_csv = any(child.glob("*.csv"))
+            if sub_dirs and not has_own_csv:
+                # Nested layout: child is a prefix like RE1-OB
+                for svc_fault_dir in sub_dirs:
+                    # Each svc_fault_dir may contain numbered instance dirs
+                    instance_dirs = [d for d in sorted(svc_fault_dir.iterdir()) if d.is_dir()]
+                    if instance_dirs:
+                        for inst_dir in instance_dirs:
+                            case_dirs.append(inst_dir)
+                    else:
+                        case_dirs.append(svc_fault_dir)
+            else:
+                case_dirs.append(child)
+
+        for case_dir in case_dirs:
+            # Derive case name: for nested layouts use parent dir name
+            # (e.g. "adservice_cpu") to get service/fault info.
+            if case_dir.parent.parent != dataset_path:
+                # Nested: case_dir = .../RE1-OB/adservice_cpu/1/
+                case_name = case_dir.parent.name
+            else:
+                case_name = case_dir.name
+
+            info = self.parse_case_name(case_name)
+            # For nested layouts the system comes from the path, not the dir name
+            if info["system"] == "unknown":
+                info["system"] = system
             if fault_types and info["fault_type"] not in fault_types:
                 continue
 
@@ -198,11 +286,21 @@ class RCAEvalLoader:
                 )
                 continue
 
+            # Load fault injection time if available
+            inject_time = None
+            inject_file = case_dir / "inject_time.txt"
+            if inject_file.exists():
+                try:
+                    inject_time = int(inject_file.read_text().strip())
+                except (ValueError, OSError):
+                    pass
+
             # Parse wide-format into per-service metrics
             services = self.parse_wide_format(metrics)
 
+            case_id = f"{case_name}_{case_dir.name}" if case_dir.parent.parent != dataset_path else case_dir.name
             case = AnomalyCase(
-                case_id=case_dir.name,
+                case_id=case_id,
                 system=info["system"],
                 label="FAULT",
                 services=services,

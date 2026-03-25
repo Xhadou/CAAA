@@ -275,27 +275,35 @@ def cross_validate_model(
     """
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
 
-    fold_metrics: Dict[str, List[float]] = {}
-
-    for fold_idx, (train_idx, test_idx) in enumerate(skf.split(X, y)):
+    def _run_fold(fold_idx, train_idx, test_idx):
         X_train, X_test = X[train_idx], X[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
-
-        # Compute naive FP rate on this fold's test set
         naive_fp = compute_false_positive_rate(
             y_test, np.zeros(len(y_test), dtype=int)
         )
-
         model = model_factory()
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
-
         metrics = compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
+        logger.debug("Fold %d: accuracy=%.3f, f1=%.3f", fold_idx, metrics["accuracy"], metrics["f1"])
+        return metrics
 
+    try:
+        from joblib import Parallel, delayed
+        fold_results = Parallel(n_jobs=-1, prefer="threads")(
+            delayed(_run_fold)(i, tr, te)
+            for i, (tr, te) in enumerate(skf.split(X, y))
+        )
+    except ImportError:
+        fold_results = [
+            _run_fold(i, tr, te)
+            for i, (tr, te) in enumerate(skf.split(X, y))
+        ]
+
+    fold_metrics: Dict[str, List[float]] = {}
+    for metrics in fold_results:
         for key, value in metrics.items():
             fold_metrics.setdefault(key, []).append(value)
-
-        logger.debug("Fold %d: accuracy=%.3f, f1=%.3f", fold_idx, metrics["accuracy"], metrics["f1"])
 
     return fold_metrics
 

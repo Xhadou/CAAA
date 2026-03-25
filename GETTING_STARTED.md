@@ -83,13 +83,31 @@ python -m venv venv
 > conda activate caaa
 > ```
 
-### Step 3: Install dependencies
+### Step 3: Install PyTorch
+
+PyTorch must be installed **before** the rest of the requirements, using the correct index for your hardware.
+
+**GPU (NVIDIA, CUDA 12.x — recommended):**
+
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+```
+
+> This works with any NVIDIA driver that supports CUDA 12.x (driver ≥ 525). The `cu126` build is compatible with drivers up to 12.8+.
+
+**CPU-only:**
+
+```bash
+pip install torch torchvision torchaudio
+```
+
+### Step 4: Install remaining dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-This installs all required packages: PyTorch, scikit-learn, XGBoost, SHAP, ruptures, NumPy, Pandas, Matplotlib, and more. See `requirements.txt` for the full list.
+This installs scikit-learn, XGBoost, SHAP, ruptures, NumPy, Pandas, Matplotlib, and more. PyTorch (already installed above) will be skipped. See `requirements.txt` for the full list.
 
 Alternatively, install as an editable package using `pyproject.toml` (includes all runtime dependencies):
 
@@ -532,15 +550,29 @@ python -m pytest tests/test_review_fixes.py -v   # ~5 seconds
 
 ## 13. Troubleshooting
 
-### `ModuleNotFoundError: No module named 'torch'`
+### `ModuleNotFoundError: No module named 'torch'` or PyTorch DLL error on Windows
 
-PyTorch was not installed. Run:
+PyTorch was not installed, or was installed with the wrong CUDA build. Install it explicitly with the right index URL **before** running `pip install -r requirements.txt`:
 
-```bash
-pip install torch>=2.6.0
+**GPU (CUDA 12.x):**
+
+```powershell
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
 
-If you need a specific PyTorch build (CPU-only, CUDA version), see [pytorch.org/get-started](https://pytorch.org/get-started/locally/).
+**CPU-only:**
+
+```powershell
+pip install torch torchvision torchaudio
+```
+
+> The `cu121` index does not have wheels for Python 3.11+. Use `cu126` for Python 3.11–3.13.
+
+Verify GPU is detected after installing:
+
+```python
+python -c "import torch; print(torch.cuda.is_available())"
+```
 
 ### `ModuleNotFoundError: No module named 'src'`
 
@@ -613,7 +645,10 @@ Here is a recommended workflow from initial exploration to paper-ready results:
 ### Phase 1: Familiarization (~5 min)
 
 ```bash
-# 1. Install and verify
+# 1. Install PyTorch (GPU with CUDA 12.x)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+# 2. Install remaining dependencies
 pip install -r requirements.txt
 python -m pytest tests/ -v --tb=short
 

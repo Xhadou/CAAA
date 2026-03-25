@@ -11,6 +11,9 @@ build/
 venv/
 .env
 
+#claude
+.claude/
+
 # Data
 data/raw/
 data/processed/

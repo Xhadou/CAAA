@@ -8,6 +8,13 @@ shap>=0.42.0
 ruptures>=1.1.0
 
 # Deep Learning
+# NOTE: Install PyTorch separately BEFORE running `pip install -r requirements.txt`.
+# The plain PyPI index only provides CPU-only builds.
+# For GPU (CUDA 12.x) — run first:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+# For CPU-only — run first:
+#   pip install torch torchvision torchaudio
+# Then proceed with: pip install -r requirements.txt
 torch>=2.6.0
 
 # Visualization

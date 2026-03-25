@@ -172,7 +172,11 @@ class AnomalyDetector:
         ).to(self.device)
 
         dataset = TimeSeriesDataset(train_data, self.seq_length)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+        use_pin = self.device != "cpu"
+        loader = DataLoader(
+            dataset, batch_size=batch_size, shuffle=True, num_workers=0,
+            pin_memory=use_pin,
+        )
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         criterion = nn.MSELoss()
 
@@ -202,20 +206,38 @@ class AnomalyDetector:
         self.threshold = float(np.percentile(errors, self.threshold_percentile))
         print(f"Anomaly threshold set to: {self.threshold:.6f}")
 
-    def compute_reconstruction_errors(self, data: np.ndarray) -> np.ndarray:
-        """Compute per-window reconstruction error."""
+    def compute_reconstruction_errors(
+        self, data: np.ndarray, batch_size: int = 64,
+    ) -> np.ndarray:
+        """Compute per-window reconstruction error.
+
+        Windows are batched together to minimise CPU→GPU transfers.
+        """
         if self.model is None:
             raise RuntimeError("Model not trained yet — call fit() first.")
-        if len(data) < self.seq_length:
+        n_windows = len(data) - self.seq_length + 1
+        if n_windows <= 0:
             return np.array([], dtype=np.float64)
+
+        # Pre-build all windows as a single contiguous tensor
+        windows = np.lib.stride_tricks.sliding_window_view(
+            data, (self.seq_length, data.shape[1]),
+        ).reshape(n_windows, self.seq_length, data.shape[1])
+        windows_t = torch.as_tensor(
+            np.ascontiguousarray(windows), dtype=torch.float32,
+        )
+
         self.model.eval()
-        errors: List[float] = []
+        errors = np.empty(n_windows, dtype=np.float64)
         with torch.no_grad():
-            for i in range(len(data) - self.seq_length + 1):
-                seq = torch.FloatTensor(data[i: i + self.seq_length]).unsqueeze(0).to(self.device)
-                reconstruction, _ = self.model(seq)
-                errors.append(torch.mean((reconstruction - seq) ** 2).item())
-        return np.array(errors)
+            for start in range(0, n_windows, batch_size):
+                batch = windows_t[start : start + batch_size].to(self.device)
+                reconstruction, _ = self.model(batch)
+                mse = torch.mean(
+                    (reconstruction - batch) ** 2, dim=(1, 2),
+                )
+                errors[start : start + batch_size] = mse.cpu().numpy()
+        return errors
 
     def detect(self, metrics: pd.DataFrame) -> Tuple[np.ndarray, float]:
         """Return anomaly scores and max score for *metrics*."""
@@ -259,8 +281,8 @@ class AnomalyDetector:
         ).to(self.device)
         self.model.load_state_dict(checkpoint["model_state"])
         self.scaler = StandardScaler()
-        self.scaler.mean_ = checkpoint["scaler_mean"].numpy() if isinstance(checkpoint["scaler_mean"], torch.Tensor) else checkpoint["scaler_mean"]
-        self.scaler.scale_ = checkpoint["scaler_scale"].numpy() if isinstance(checkpoint["scaler_scale"], torch.Tensor) else checkpoint["scaler_scale"]
+        self.scaler.mean_ = checkpoint["scaler_mean"].cpu().numpy() if isinstance(checkpoint["scaler_mean"], torch.Tensor) else checkpoint["scaler_mean"]
+        self.scaler.scale_ = checkpoint["scaler_scale"].cpu().numpy() if isinstance(checkpoint["scaler_scale"], torch.Tensor) else checkpoint["scaler_scale"]
         self.scaler.var_ = self.scaler.scale_ ** 2
         self.scaler.n_features_in_ = n_features
         self.threshold = checkpoint["threshold"]
