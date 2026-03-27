@@ -24,7 +24,7 @@ models/checkpoints/
 models/final/
 
 # Outputs
-outputs/
+#outputs/
 
 # IDE
 .idea/

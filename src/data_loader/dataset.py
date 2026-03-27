@@ -200,8 +200,8 @@ def generate_research_dataset(
 
 
 def generate_rcaeval_dataset(
-    dataset: str = "RE1",
-    system: str = "online-boutique",
+    dataset: "str | List[str]" = "RE1",
+    system: "str | List[str]" = "online-boutique",
     n_load_per_fault: int = 1,
     data_dir: str = "data/raw",
     seed: int = 42,
@@ -212,9 +212,11 @@ def generate_rcaeval_dataset(
     benchmark paired with synthetic expected-load cases for attribution training.
 
     Args:
-        dataset: RCAEval dataset identifier (``"RE1"`` or ``"RE2"``).
-        system: Microservice system (``"online-boutique"``, ``"sock-shop"``,
-            or ``"train-ticket"``).
+        dataset: RCAEval dataset identifier(s). A single string like ``"RE1"``
+            or a list like ``["RE1", "RE2", "RE3"]``.
+        system: Microservice system(s). A single string like
+            ``"online-boutique"`` or a list like
+            ``["online-boutique", "sock-shop", "train-ticket"]``.
         n_load_per_fault: Number of synthetic load cases per fault case.
         data_dir: Path to downloaded RCAEval data.
         seed: Random seed.
@@ -223,24 +225,35 @@ def generate_rcaeval_dataset(
         Tuple of (fault_cases, load_cases) as AnomalyCase lists.
 
     Raises:
-        FileNotFoundError: If the RCAEval data has not been downloaded.
-            Call :func:`src.data_loader.download_data.download_rcaeval_dataset`
-            first.
+        FileNotFoundError: If none of the requested RCAEval combinations
+            contain data.
     """
     from src.data_loader.rcaeval_loader import RCAEvalLoader
 
+    datasets = [dataset] if isinstance(dataset, str) else list(dataset)
+    systems = [system] if isinstance(system, str) else list(system)
+
     loader = RCAEvalLoader(data_dir=data_dir)
-    fault_cases = loader.load_dataset(dataset=dataset, system=system)
+    fault_cases: List[AnomalyCase] = []
+
+    for ds in datasets:
+        for sys_name in systems:
+            try:
+                cases = loader.load_dataset(dataset=ds, system=sys_name)
+            except FileNotFoundError:
+                logger.warning("No data at %s/%s/%s — skipping", data_dir, ds, sys_name)
+                continue
+            if cases:
+                logger.info("Loaded %d fault cases from RCAEval %s/%s", len(cases), ds, sys_name)
+                fault_cases.extend(cases)
+            else:
+                logger.warning("Empty dataset for %s/%s — skipping", ds, sys_name)
 
     if not fault_cases:
         raise FileNotFoundError(
-            f"No RCAEval data found at {data_dir}/{dataset}/{system}. "
-            f"Run: python -c \"from src.data_loader.download_data import "
-            f"download_rcaeval_dataset; download_rcaeval_dataset('{dataset}', "
-            f"['{system}'])\""
+            f"No RCAEval data found for datasets={datasets}, systems={systems} "
+            f"in {data_dir}. Download the data first."
         )
-
-    logger.info("Loaded %d fault cases from RCAEval %s/%s", len(fault_cases), dataset, system)
 
     # Generate synthetic EXPECTED_LOAD cases
     load_gen = SyntheticMetricsGenerator(seed=seed)

@@ -20,7 +20,11 @@ class RCAEvalLoader:
     :func:`src.data_loader.download_data.download_rcaeval_dataset`.
     """
 
-    FAULT_TYPES = ["cpu", "mem", "disk", "delay", "loss", "socket"]
+    FAULT_TYPES = [
+        "cpu", "mem", "disk", "delay", "loss", "socket",
+        # RE3 uses generic fault IDs
+        "f1", "f2", "f3", "f4", "f5",
+    ]
 
     def __init__(self, data_dir: str = "data/raw") -> None:
         self.data_dir = Path(data_dir)
@@ -71,20 +75,34 @@ class RCAEvalLoader:
 
     @staticmethod
     def load_metrics(case_path: Path) -> pd.DataFrame:
-        """Load the metrics CSV file from a case directory."""
-        metrics_file = case_path / "metrics.csv"
-        if not metrics_file.exists():
-            # Also check for "data.csv" (common in RCAEval datasets)
-            data_csv = case_path / "data.csv"
-            if data_csv.exists():
-                metrics_file = data_csv
-            else:
-                for f in case_path.glob("*.csv"):
-                    if "metric" in f.name.lower() or f.name == "data.csv":
-                        metrics_file = f
-                        break
+        """Load the metrics CSV file from a case directory.
 
-        if metrics_file.exists():
+        Prefers ``simple_metrics.csv`` / ``simple_data.csv`` (clean
+        ``{service}_{metric}`` columns) over the raw ``metrics.csv`` /
+        ``data.csv`` which may contain hundreds of hyphenated Prometheus-
+        style columns that the wide-format parser cannot split.
+        """
+        # Priority order: simple formats first, then raw formats
+        candidates = [
+            case_path / "simple_metrics.csv",
+            case_path / "simple_data.csv",
+            case_path / "metrics.csv",
+            case_path / "data.csv",
+        ]
+        metrics_file = None
+        for candidate in candidates:
+            if candidate.exists():
+                metrics_file = candidate
+                break
+
+        if metrics_file is None:
+            # Last resort: any CSV with "metric" or "data" in the name
+            for f in case_path.glob("*.csv"):
+                if "metric" in f.name.lower() or "data" in f.name.lower():
+                    metrics_file = f
+                    break
+
+        if metrics_file is not None and metrics_file.exists():
             df = pd.read_csv(metrics_file)
             # Drop duplicate columns (e.g. second "time" column in RCAEval CSVs)
             df = df.loc[:, ~df.columns.duplicated()]
@@ -135,7 +153,15 @@ class RCAEvalLoader:
         "mem": "memory_usage",
         "load": "request_rate",
         "error": "error_rate",
+        # Additional RCAEval simple-format suffixes (RE2/RE3)
+        "workload": "request_rate",
+        "latency-50": "latency",
+        "latency-90": "latency",  # prefer p90; overwrites p50 if both present
+        "diskio": "network_in",   # map to network_in as proxy for I/O
+        "socket": "network_out",  # map to network_out as proxy for connections
     }
+    # Sort longest-first so "latency-90" is tried before "latency"
+    _KNOWN_METRICS_ORDERED = sorted(_METRIC_ALIASES.keys(), key=len, reverse=True)
     _KNOWN_METRICS = set(_METRIC_ALIASES.keys())
 
     # The canonical metric columns expected by downstream code
@@ -167,7 +193,7 @@ class RCAEvalLoader:
                 continue
             # Try to split as service_metric
             matched = False
-            for metric in cls._KNOWN_METRICS:
+            for metric in cls._KNOWN_METRICS_ORDERED:
                 if col.endswith(f"_{metric}"):
                     svc_name = col[: -(len(metric) + 1)]
                     std_metric = cls._METRIC_ALIASES[metric]

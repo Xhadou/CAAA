@@ -69,8 +69,8 @@ def run_pipeline(
     output_dir: str = "outputs/results",
     # RCAEval data params
     data_source: str = "synthetic",
-    dataset: str = "RE1",
-    system: str = "online-boutique",
+    dataset: "str | list" = "RE1",
+    system: "str | list" = "online-boutique",
     n_load_per_fault: int = 1,
     data_dir: str = "data/raw",
     # Anomaly detector params
@@ -138,7 +138,10 @@ def run_pipeline(
             data_dir=data_dir,
             seed=seed,
         )
-        print(f"  RCAEval: {len(fault_cases)} real faults + {len(load_cases)} synthetic loads")
+        ds_label = dataset if isinstance(dataset, str) else ", ".join(dataset)
+        sys_label = system if isinstance(system, str) else ", ".join(system)
+        print(f"  RCAEval [{ds_label} x {sys_label}]: "
+              f"{len(fault_cases)} real faults + {len(load_cases)} synthetic loads")
     else:
         fault_cases, load_cases = generate_combined_dataset(
             n_fault=n_fault, n_load=n_load, systems=systems, seed=seed,
@@ -373,11 +376,10 @@ def main() -> None:
         choices=["synthetic", "rcaeval"],
         help="Data source: synthetic (default) or rcaeval (real faults)",
     )
-    parser.add_argument("--dataset", type=str, default="RE1",
-                        choices=["RE1", "RE2", "RE3"], help="RCAEval dataset")
-    parser.add_argument("--system", type=str, default="online-boutique",
-                        choices=["online-boutique", "sock-shop", "train-ticket"],
-                        help="Microservice system (for rcaeval)")
+    parser.add_argument("--dataset", type=str, nargs="+", default=["RE1"],
+                        help="RCAEval dataset(s): RE1 RE2 RE3 or 'all'")
+    parser.add_argument("--system", type=str, nargs="+", default=["online-boutique"],
+                        help="Microservice system(s) or 'all'")
     parser.add_argument("--load-ratio", type=int, default=1,
                         help="Synthetic loads per RCAEval fault")
     parser.add_argument("--data-dir", type=str, default="data/raw",
@@ -410,9 +412,17 @@ def main() -> None:
         else:
             logging.warning("Config file %s not found; using CLI defaults.", args.config)
 
+    # Expand "all" shortcuts for dataset/system lists
+    all_datasets = ["RE1", "RE2", "RE3"]
+    all_systems = ["online-boutique", "sock-shop", "train-ticket"]
+    if "all" in args.dataset:
+        args.dataset = all_datasets
+    if "all" in args.system:
+        args.system = all_systems
+
     if args.download_data:
         from src.data_loader.download_data import download_rcaeval_dataset
-        download_rcaeval_dataset(args.dataset, [args.system], args.data_dir)
+        download_rcaeval_dataset(args.dataset, args.system, args.data_dir)
         return
 
     run_pipeline(
