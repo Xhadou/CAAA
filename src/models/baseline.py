@@ -41,6 +41,7 @@ class BaselineClassifier:
             n_estimators=n_estimators,
             max_depth=max_depth,
             random_state=random_state,
+            n_jobs=1,
         )
         logger.info(
             "BaselineClassifier initialized: n_estimators=%d, max_depth=%d",
@@ -115,14 +116,18 @@ class NaiveBaseline:
 class RuleBasedBaseline:
     """Rule-based baseline using simple feature thresholds.
 
-    Predicts EXPECTED_LOAD (1) if ``event_active > 0.5`` AND
+    Predicts EXPECTED_LOAD (1) if ``cpu_deviation < 0.5`` AND
     ``error_rate_delta < 0.3``; predicts FAULT (0) otherwise.
+
+    ``cpu_deviation`` (context slot 12) measures how much the observed CPU
+    deviates from a baseline reference.  Low deviation indicates normal
+    load behaviour; high deviation indicates a fault-like pattern.
 
     This tests whether a simple decision rule can match the neural model.
     """
 
     def __init__(self) -> None:
-        self._event_active_idx = ALL_FEATURE_NAMES.index("event_active")
+        self._cpu_deviation_idx = ALL_FEATURE_NAMES.index("cpu_deviation")
         self._error_rate_delta_idx = ALL_FEATURE_NAMES.index("error_rate_delta")
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
@@ -137,9 +142,9 @@ class RuleBasedBaseline:
         Returns:
             Predicted labels of shape (n_samples,).
         """
-        event_active = X[:, self._event_active_idx]
+        cpu_deviation = X[:, self._cpu_deviation_idx]
         error_delta = X[:, self._error_rate_delta_idx]
-        is_load = (event_active > 0.5) & (error_delta < 0.3)
+        is_load = (cpu_deviation < 0.5) & (error_delta < 0.3)
         return np.where(is_load, 1, 0).astype(int)
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
@@ -192,6 +197,7 @@ class XGBoostBaseline:
             random_state=random_state,
             eval_metric="logloss",
             verbosity=0,
+            n_jobs=1,
         )
         logger.info(
             "XGBoostBaseline initialized: n_estimators=%d, max_depth=%d, lr=%.3f",
@@ -264,6 +270,7 @@ class LightGBMBaseline:
             learning_rate=learning_rate,
             random_state=random_state,
             verbosity=-1,
+            n_jobs=1,
         )
         logger.info(
             "LightGBMBaseline initialized: n_estimators=%d, max_depth=%d, lr=%.3f",
@@ -336,6 +343,7 @@ class CatBoostBaseline:
             learning_rate=learning_rate,
             random_seed=random_state,
             verbose=0,
+            thread_count=1,
         )
         logger.info(
             "CatBoostBaseline initialized: iterations=%d, depth=%d, lr=%.3f",

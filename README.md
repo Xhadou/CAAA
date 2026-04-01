@@ -44,9 +44,12 @@ CAAA addresses this gap by integrating external context signals — scheduled ev
 
 ## Novel Contributions
 
-1. **Context-Aware Anomaly Attribution** — The first framework to explicitly distinguish workload-induced anomalies from actual faults using external context signals within a unified classification pipeline.
-2. **Context Consistency Loss** — A novel composite loss function that penalizes predictions contradicting available context signals while calibrating prediction confidence based on context reliability.
-3. **Context Integration Module** — An attention-based module with confidence gating that learns to weight and integrate heterogeneous context features into the classification decision.
+1. **Context-Aware Anomaly Attribution** — The first framework to explicitly distinguish workload-induced anomalies from actual faults using context signals within a unified classification pipeline. Supports external context (operational metadata) and comparison context (counterfactual baseline deviation).
+2. **Context Consistency Loss** — A composite loss function with gated unknown-context penalty and TADAM-style delta regularization, preventing FiLM noise amplification on small datasets.
+3. **Context Integration Module** — FiLM conditioning with confidence gating (skeptical initialization, bias=-1.0) and feature-group dropout for noise robustness.
+4. **Piecewise Linear Embeddings (PLE)** — Quantile-based bin encodings that give the MLP axis-aligned threshold capability similar to tree splits, closing the neural-tree gap on tabular data.
+5. **CAAA+CatBoost Hybrid** — FiLM-conditioned neural embeddings concatenated with raw features, classified by CatBoost. The first work combining FiLM conditioning with tree-based downstream classifiers.
+6. **Evaluation Methodology** — Severity-tiered synthetic data with disguised faults, pre-injection split for honest RCAEval evaluation, counterfactual baselines, and label leakage prevention via randomized context assignment.
 
 ## Architecture
 
@@ -83,22 +86,34 @@ The full 44-dim feature vector (including context dims 12–16) is passed throug
 
 #### Confidence Gate Initialization
 
-The confidence gate in the Context Integration Module is initialized with `bias=1.0`, producing an initial sigmoid output of ≈0.73. This allows context features to flow through the gate by default rather than starting at an uninformative ≈0.5, improving early training dynamics.
+The confidence gate is initialized with `bias=-1.0`, producing an initial sigmoid output of ~0.27. This makes the model **skeptical of context by default** -- it must learn to trust the context signal through training, preventing over-reliance on noisy context features early in training (Sheth et al., NeurIPS 2022 ICBINB Workshop).
+
+#### Piecewise Linear Embeddings (PLE)
+
+Each scalar feature is transformed into an 8-bin encoding via quantile boundaries computed from training data. This gives the MLP axis-aligned threshold capability similar to tree splits, addressing the fundamental sample-efficiency gap between neural networks and trees on small tabular data (Gorishniy et al., NeurIPS 2022).
 
 ### Context Consistency Loss
 
-The novel loss function combines three terms:
+The loss function combines four terms:
 
 - **Cross-entropy classification loss** (with label smoothing 0.1)
-- **Context consistency penalty** — penalizes predictions that contradict available context signals, weighted by confidence² for softer penalty on ambiguous cases
-- **Confidence calibration loss** — entropy regularization guided by context confidence scores
+- **Context consistency penalty** -- penalizes predictions contradicting context signals, weighted by clamped confidence (floor=0.3) to ensure learning signal even for low-confidence cases
+- **Gated unknown-context penalty** -- penalizes EXPECTED_LOAD predictions above 0.7 confidence when no context explains the anomaly (configurable via `--loss-variant`)
+- **Confidence calibration loss** -- entropy regularization guided by context confidence scores
 
-**Penalty scale behavior:** When `event_active ≈ 0.5` and model probabilities are also ≈ 0.5, the per-sample consistency penalty approaches 1.0. With the default `alpha=0.3`, this contributes up to 0.3 to the total loss — comparable to the classification cross-entropy on well-separated data. The penalty therefore dominates early in training when the model is uncertain, and naturally diminishes as predictions become more confident.
+Three loss variants are supported via `--loss-variant`:
+- `gated` (default): Unknown penalty fires only when load_prob > 0.7
+- `clamp`: No unknown penalty, clamp-only consistency
+- `full`: Original aggressive penalty (for comparison)
+
+**TADAM-style regularization:** When using `--film-mode tadam`, the FiLM gamma is constrained to `1 + delta` with L2 penalty on delta, keeping the multiplicative path near identity and preventing noise amplification.
 
 **Training methodology:**
-- 3-way stratified split (60% train / 20% val / 20% test) — validation for early stopping and calibration, test for final metrics only
-- AdamW optimizer with ReduceLROnPlateau scheduler and gradient clipping (max_norm=1.0)
-- StandardScaler normalization for neural models (tree baselines use raw features)
+
+- 3-way stratified split (60% train / 20% val / 20% test)
+- AdamW optimizer (weight_decay=1e-3) with ReduceLROnPlateau scheduler and gradient clipping (max_norm=1.0)
+- NaNSafeScaler normalization for neural models (tree baselines use raw features)
+- Feature-group dropout: context features (slots 12-16) zeroed with 30% probability during training
 - GPU auto-detection (`--device auto|cpu|cuda`)
 
 ## Feature Vector
@@ -109,7 +124,7 @@ The system extracts a 44-dimensional feature vector organized into 6 groups, def
 |-------|------|----------|---------|
 | **Workload** | 0–5 | `global_load_ratio`, `cpu_request_correlation`, `cross_service_sync`, `error_rate_delta`, `latency_cpu_correlation`, `change_point_magnitude` | Characterize whether metric changes correlate with workload |
 | **Behavioral** | 6–11 | `onset_gradient`, `peak_duration`, `cascade_score`, `recovery_indicator`, `affected_service_ratio`, `variance_change_ratio` | Capture fault propagation signatures vs. smooth load ramps |
-| **Context** | 12–16 | `event_active`, `event_expected_impact`, `time_seasonality`, `recent_deployment`, `context_confidence` | External context signals (the key innovation). `time_seasonality` returns a neutral 0.5 for synthetic data (sequential integer timestamps) and only activates on real-world epoch-based timestamps. |
+| **Context** | 12–16 | `cpu_deviation`, `error_rate_ratio`, `correlation_shift`, `latency_deviation`, `baseline_confidence` | Context signals derived by comparing the anomalous window to a counterfactual baseline. On synthetic data, external context (`event_active`, etc.) is used instead via `--context-mode external`. |
 | **Statistical** | 17–29 | Mean/std of CPU, memory, requests, errors, latency, network; `max_error_rate` | Standard metric statistics |
 | **Service-Level** | 30–35 | `n_services`, `max_cpu_service_ratio`, `max_error_service_ratio`, `cpu_spread`, `error_spread`, `latency_spread` | Cross-service aggregation patterns |
 | **Extended** | 36–43 | `spectral_entropy`, `high_freq_energy_ratio`, `dominant_frequency`, `network_asymmetry`, `graph_anomaly_centrality`, `anomaly_spread`, `max_cpu_derivative`, `error_rate_slope` | Frequency-domain, graph-structural, and rate-of-change features |
@@ -235,40 +250,37 @@ python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5 --inc
 
 | # | Variant | Purpose |
 |---|---------|---------|
-| 1 | Full CAAA | Complete proposed model |
+| 1 | Full CAAA | Complete proposed model (TADAM + context dropout) |
 | 2 | CAAA + Contrastive | With contrastive learning |
-| 3 | No Context Features | Ablate context inputs |
-| 4 | No Context Loss | Standard cross-entropy only |
-| 5 | No Behavioral Features | Ablate behavioral inputs |
-| 6 | Context Only | Context features alone |
-| 7 | Statistical Only | Statistical features alone |
-| 8 | Stat + Service-Level | Combined traditional features |
-| 9 | Baseline RF | Random Forest baseline |
-| 10 | XGBoost | XGBoost baseline |
-| 11 | LightGBM | LightGBM baseline |
-| 12 | CatBoost | CatBoost baseline |
-| 13 | Rule-Based | Heuristic rules |
-| 14 | Naive | No-context naive classifier |
+| 3 | CAAA (clamp loss) | No unknown penalty, clamp-only consistency |
+| 4 | CAAA (full penalty) | Original aggressive penalty (for comparison) |
+| 5 | No Context Features | Ablate context inputs |
+| 6 | No Context Loss | Standard cross-entropy only |
+| 7 | No Behavioral Features | Ablate behavioral inputs |
+| 8 | Context Only | Context features alone |
+| 9 | Statistical Only | Statistical features alone |
+| 10 | Stat + Service-Level | Combined traditional features |
+| 11 | Baseline RF | Random Forest baseline |
+| 12 | XGBoost | XGBoost baseline |
+| 13 | LightGBM | LightGBM baseline |
+| 14 | CatBoost | CatBoost baseline |
+| 15 | CAAA+CatBoost Hybrid | FiLM embeddings + raw features into CatBoost |
+| 16 | Rule-Based | Heuristic rules |
+| 17 | Naive | No-context naive classifier |
 
 ### Using RCAEval Real-World Data
 
-CAAA can be evaluated on [RCAEval](https://zenodo.org/records/14590730) benchmark data — real-world microservice failure traces:
+CAAA evaluates on [RCAEval](https://zenodo.org/records/14590730) benchmark data using a **pre-injection split**: each case is split at `inject_time` into a FAULT half (post-injection) and a NORMAL half (pre-injection). Both halves come from the same real recording, eliminating distribution mismatch. Context is randomized (70% of NORMAL cases get context, 30% don't; 30% of FAULT cases get fake context) to prevent label leakage.
 
 ```bash
 # Download dataset (one-time, requires network)
-python -m src.main --download-data --dataset RE1 --system online-boutique
+python -m src.main --download-data --dataset all --system all
 
-# Download RE3 dataset
-python -m src.main --download-data --dataset RE3 --system online-boutique
+# Ablation on all real data (per-system + combined summary)
+python scripts/ablation.py --data rcaeval --dataset all --system all \
+    --epochs 50 --n-runs 10
 
-# Train with real fault data + synthetic expected-load cases
-python -m src.main --data rcaeval --dataset RE1 --system online-boutique --model caaa
-
-# Full pipeline with anomaly detection pre-stage
-python -m src.main --data rcaeval --dataset RE1 --system online-boutique \
-    --model caaa --anomaly-detector --ad-epochs 50
-
-# Ablation on real data
+# Single system
 python scripts/ablation.py --data rcaeval --dataset RE1 --system online-boutique \
     --epochs 50 --n-runs 10
 ```
@@ -291,12 +303,15 @@ Experiments write results to the `outputs/` directory (gitignored):
 ```
 outputs/
 ├── results/
-│   ├── caaa_model.pt                # Trained CAAA model checkpoint
-│   └── ablation_results.csv         # Ablation study metrics table
-├── figures/
-│   ├── shap/
-│   │   ├── shap_full_caaa.png       # SHAP feature importance (CAAA)
-│   │   ├── shap_baseline_rf.png     # SHAP feature importance (RF)
+│   ├── caaa_model.pt                          # Trained CAAA model checkpoint
+│   ├── ablation_results_synthetic.csv         # Synthetic ablation metrics
+│   ├── ablation_results_RE1_online-boutique.csv  # Per-system RCAEval results
+│   ├── ablation_results_RE1_sock-shop.csv
+│   ├── ablation_results_combined.csv          # Macro-averaged across all systems
+│   ├── shap_synthetic/                        # SHAP plots for synthetic data
+│   │   ├── shap_full_caaa.png
+│   │   └── shap_baseline_rf.png
+│   └── calibration_synthetic/                 # Calibration reliability diagrams
 │   │   └── shap_*_by_fault_type.png # Per-fault-type SHAP plots
 │   └── calibration/
 │       ├── reliability_uncalibrated.png  # Before temperature scaling

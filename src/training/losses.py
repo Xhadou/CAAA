@@ -59,16 +59,32 @@ class ContextConsistencyLoss(nn.Module):
         beta: Weight for the confidence calibration loss component.
     """
 
-    def __init__(self, alpha: float = 0.3, beta: float = 0.1) -> None:
+    def __init__(
+        self,
+        alpha: float = 0.3,
+        beta: float = 0.1,
+        unknown_weight: float = 0.2,
+        loss_variant: str = "gated",
+    ) -> None:
         """Initializes the ContextConsistencyLoss.
 
         Args:
             alpha: Weight for context consistency loss.
             beta: Weight for confidence calibration loss.
+            unknown_weight: Weight for the unknown-context penalty that
+                penalizes EXPECTED_LOAD predictions when no event is active
+                and context confidence is low.
+            loss_variant: Controls unknown-context penalty behavior.
+                ``"gated"`` (default) only penalizes high-confidence LOAD
+                predictions without context.  ``"clamp"`` disables the
+                penalty entirely.  ``"full"`` uses the original aggressive
+                behavior.
         """
         super().__init__()
         self.alpha = alpha
         self.beta = beta
+        self.unknown_weight = unknown_weight
+        self.loss_variant = loss_variant
         self.ce_loss = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def forward(
@@ -106,12 +122,24 @@ class ContextConsistencyLoss(nn.Module):
         load_prob = probs[:, 1]
         penalty_when_no_event = (1.0 - event_active) * load_prob
 
-        # Weight by context_confidence squared so that corrupted/unreliable
-        # context (30% of faults with fake events, 30% of loads without
-        # events) contributes very little to the penalty.  Squaring makes
-        # the penalty softer for ambiguous cases (confidence ~0.3-0.5).
+        # Weight by clamped context_confidence so that low-confidence cases
+        # (disguised faults, unscheduled loads) still produce learning signal.
+        # Floor of 0.3 ensures disguised faults contribute 30% of the penalty
+        # that high-confidence cases do.
         per_sample_penalty = penalty_when_event + penalty_when_no_event
-        consistency_loss = torch.mean(context_confidence ** 2 * per_sample_penalty)
+        conf_weight = torch.clamp(context_confidence, min=0.3)
+        consistency_loss = torch.mean(conf_weight * per_sample_penalty)
+
+        # Unknown context penalty — variant-dependent
+        unknown_context = (1.0 - event_active) * (1.0 - context_confidence)
+        if self.loss_variant == "clamp":
+            unknown_penalty = torch.tensor(0.0, device=logits.device)
+        elif self.loss_variant == "gated":
+            # Only penalize when model is very confident about LOAD without context
+            gated_load_prob = torch.clamp(load_prob - 0.7, min=0.0)
+            unknown_penalty = torch.mean(unknown_context * gated_load_prob)
+        else:  # "full" — current aggressive behavior
+            unknown_penalty = torch.mean(unknown_context * load_prob)
 
         # 3. Confidence calibration loss
         # When context_confidence is high, penalize high entropy (uncertainty)
@@ -121,12 +149,18 @@ class ContextConsistencyLoss(nn.Module):
         calibration_loss = torch.mean(context_confidence * entropy)
 
         # Combined loss
-        total_loss = cls_loss + self.alpha * consistency_loss + self.beta * calibration_loss
+        total_loss = (
+            cls_loss
+            + self.alpha * consistency_loss
+            + self.beta * calibration_loss
+            + self.unknown_weight * unknown_penalty
+        )
 
         components = {
             "cls_loss": cls_loss.item(),
             "consistency_loss": consistency_loss.item(),
             "calibration_loss": calibration_loss.item(),
+            "unknown_penalty": unknown_penalty.item(),
         }
 
         return total_loss, components

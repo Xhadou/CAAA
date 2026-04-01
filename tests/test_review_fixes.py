@@ -196,9 +196,12 @@ class TestTimeSeasonalityFix:
             services=[ServiceMetrics(service_name="frontend", metrics=df)],
             context={},
         )
-        ext = FeatureExtractor(seed=42)
+        ext = FeatureExtractor(seed=42, context_mode="external")
         feats = ext.extract(case)
-        ts_idx = ext.feature_names().index("time_seasonality")
+        # Index 14 is the third context slot (12 + 2); in external mode it
+        # holds the time_seasonality value. The name in the schema has changed
+        # to "correlation_shift" but the value semantics are preserved.
+        ts_idx = 14
         assert feats[ts_idx] == 0.5
 
 

@@ -37,11 +37,15 @@ class CAAATrainer:
         self,
         model: CAAAModel,
         learning_rate: float = 0.001,
-        weight_decay: float = 1e-4,
+        weight_decay: float = 1e-3,
         device: str = "auto",
         use_context_loss: bool = True,
         loss_type: str = "context_consistency",
         max_grad_norm: float = 1.0,
+        unknown_weight: float = 0.2,
+        loss_variant: str = "gated",
+        context_dropout_p: float = 0.3,
+        tadam_lambda: float = 0.01,
     ) -> None:
         """Initializes the CAAATrainer.
 
@@ -61,11 +65,21 @@ class CAAATrainer:
                 ``"cross_entropy"`` — plain CrossEntropyLoss (no smoothing).
             max_grad_norm: Maximum gradient norm for clipping. Set to 0 to
                 disable gradient clipping.
+            unknown_weight: Weight for unknown-context penalty in
+                ContextConsistencyLoss.
+            context_dropout_p: Probability of zeroing out context features
+                during training (feature-group dropout).
+            tadam_lambda: L2 regularization coefficient on FiLM delta for
+                TADAM mode. Set to 0 to disable.
         """
         self.device = resolve_device(device)
         self.model = model.to(self.device)
         self.loss_type = loss_type
         self.max_grad_norm = max_grad_norm
+        self.unknown_weight = unknown_weight
+        self.loss_variant = loss_variant
+        self.context_dropout_p = context_dropout_p
+        self.tadam_lambda = tadam_lambda
 
         # Backward compat: use_context_loss=False overrides to cross_entropy
         if not use_context_loss and loss_type == "context_consistency":
@@ -81,7 +95,9 @@ class CAAATrainer:
         if self.loss_type == "contrastive":
             self.criterion = SupConContextLoss()
         elif self.loss_type == "context_consistency":
-            self.criterion = ContextConsistencyLoss()
+            self.criterion = ContextConsistencyLoss(
+                unknown_weight=unknown_weight, loss_variant=loss_variant,
+            )
         elif self.loss_type == "focal":
             self.criterion = FocalLoss()
         else:
@@ -138,6 +154,9 @@ class CAAATrainer:
         best_state = None
         n_samples = X_train_t.shape[0]
 
+        # Set PLE bin edges from training data
+        self.model.set_bins(X_train)
+
         for epoch in range(epochs):
             self.model.train()
             epoch_loss = 0.0
@@ -152,6 +171,12 @@ class CAAATrainer:
                 batch_idx = indices[start : start + batch_size]
                 X_batch = X_train_t[batch_idx]
                 y_batch = y_train_t[batch_idx]
+
+                # Feature-group dropout: zero out context features with prob p
+                if self.context_dropout_p > 0 and self.model.training:
+                    ctx_mask = (torch.rand(X_batch.shape[0], 1, device=self.device) > self.context_dropout_p).float()
+                    X_batch = X_batch.clone()
+                    X_batch[:, _CONTEXT_START:_CONTEXT_END] *= ctx_mask
 
                 self.optimizer.zero_grad()
                 if self.loss_type == "contrastive":
@@ -168,6 +193,11 @@ class CAAATrainer:
                 else:
                     logits = self.model(X_batch)
                     loss = self.criterion(logits, y_batch)
+                # TADAM regularization: L2 penalty on FiLM delta
+                if self.tadam_lambda > 0 and hasattr(self.model, 'context_module'):
+                    cm = self.model.context_module
+                    if hasattr(cm, 'last_delta') and cm.last_delta is not None:
+                        loss = loss + self.tadam_lambda * (cm.last_delta ** 2).mean()
                 if torch.isnan(loss):
                     logger.warning("NaN loss detected at epoch %d, batch %d", epoch + 1, batch_num + 1)
                     continue

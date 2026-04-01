@@ -383,9 +383,11 @@ def plot_shap_summary(
     else:
         shap_values = explainer.shap_values(X_test, nsamples=nsamples)
 
-    # For binary classification, use class-1 SHAP values if list
+    # For binary classification, use class-1 SHAP values if list or 3D array
     if isinstance(shap_values, list):
         shap_values = shap_values[1]
+    elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+        shap_values = shap_values[:, :, 1]
 
     fig = plt.figure(figsize=(10, 10))
     shap.summary_plot(
@@ -438,6 +440,8 @@ def plot_shap_by_class(
 
     if isinstance(shap_values, list):
         shap_values = shap_values[1]
+    elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+        shap_values = shap_values[:, :, 1]
 
     fault_mask = y_test == 0
     load_mask = y_test == 1
@@ -518,6 +522,8 @@ def plot_shap_by_fault_type(
 
     if isinstance(shap_values, list):
         shap_values = shap_values[1]
+    elif isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+        shap_values = shap_values[:, :, 1]
 
     # Group by fault type
     unique_types = sorted(set(ft for ft in fault_types if ft is not None))

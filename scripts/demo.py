@@ -10,7 +10,6 @@ import numpy as np
 import yaml
 import torch
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 
 # Fallback for running without `pip install -e .`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -20,7 +19,7 @@ from src.features import FeatureExtractor
 from src.models import CAAAModel, NaiveBaseline
 from src.training.trainer import CAAATrainer
 from src.evaluation.metrics import compute_all_metrics, compute_false_positive_rate
-from src.utils import set_seed, resolve_device
+from src.utils import set_seed, resolve_device, NaNSafeScaler
 
 
 def main():
@@ -86,7 +85,7 @@ def main():
     )
 
     # Scale features (fit on train only) for neural models
-    scaler = StandardScaler()
+    scaler = NaNSafeScaler()
     X_train = scaler.fit_transform(X_train)
     X_val = scaler.transform(X_val)
     X_test = scaler.transform(X_test)

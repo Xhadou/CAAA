@@ -150,7 +150,16 @@ class FeatureExtractor:
             same case twice produces identical features.
     """
 
-    def __init__(self, seed: int = 42) -> None:
+    def __init__(self, seed: int = 42, context_mode: str = "comparison") -> None:
+        """Initialize the feature extractor.
+
+        Args:
+            seed: Random seed for reproducible noise in context features.
+            context_mode: ``"derived"`` computes context from metrics
+                (works identically on synthetic and real data).
+                ``"external"`` uses the context dict from AnomalyCase
+                (original behavior, subject to label leakage on real data).
+        """
         self._names: List[str] = (
             _WORKLOAD_NAMES
             + _BEHAVIORAL_NAMES
@@ -164,6 +173,7 @@ class FeatureExtractor:
                 f"Feature name count {len(self._names)} != N_FEATURES {N_FEATURES}"
             )
         self._seed = seed
+        self._context_mode = context_mode
         self._case_counter = 0
 
     # ------------------------------------------------------------------
@@ -192,7 +202,11 @@ class FeatureExtractor:
         feats = np.concatenate([
             self._workload_features(case.services),
             self._behavioral_features(case.services),
-            self._context_features(case.context, case.services, rng=case_rng),
+            self._comparison_context_features(case.services, case.reference_services)
+            if self._context_mode == "comparison"
+            else self._derived_context_features(case.services)
+            if self._context_mode == "derived"
+            else self._context_features(case.context, case.services, rng=case_rng),
             self._statistical_features(case.services),
             self._service_level_features(case.services),
             self._extended_features(case),
@@ -403,7 +417,232 @@ class FeatureExtractor:
         ])
 
     # ------------------------------------------------------------------
-    # Context features (5)
+    # Metric-derived context features (5)
+    # ------------------------------------------------------------------
+
+    def _derived_context_features(
+        self, services: Optional[List[ServiceMetrics]] = None,
+    ) -> np.ndarray:
+        """Compute context features from metrics themselves.
+
+        These replace the externally-assigned context features with signals
+        derived from the data, eliminating the semantic shift between
+        synthetic and real data.  The 5 features occupy the same [12:17]
+        slots and map to the same concepts the ContextIntegrationModule
+        expects.
+        """
+        if not services or len(services) == 0:
+            return np.array([0.5, 0.5, 0.5, 0.5, 0.5])
+
+        # --- anomaly_gini (replaces event_active) ---
+        # Gini coefficient of per-service CPU delta (2nd half vs 1st half).
+        # 0 = uniform change (load-like), 1 = concentrated (fault-like).
+        cpu_deltas = []
+        for svc in services:
+            cpu = svc.metrics["cpu_usage"].values
+            mid = len(cpu) // 2
+            if mid == 0:
+                cpu_deltas.append(0.0)
+                continue
+            delta = abs(float(np.mean(cpu[mid:]) - np.mean(cpu[:mid])))
+            cpu_deltas.append(delta)
+        cpu_deltas = np.array(cpu_deltas)
+        total = cpu_deltas.sum()
+        if total < 1e-10 or len(cpu_deltas) < 2:
+            anomaly_gini = 0.5
+        else:
+            # Gini formula: sum of |xi - xj| / (2 * n * mean)
+            n = len(cpu_deltas)
+            diff_sum = sum(abs(cpu_deltas[i] - cpu_deltas[j])
+                          for i in range(n) for j in range(n))
+            anomaly_gini = float(np.clip(diff_sum / (2 * n * total), 0.0, 1.0))
+
+        # --- load_uniformity (replaces event_expected_impact) ---
+        # min/max CPU delta ratio across services. High = load, Low = fault.
+        max_delta = cpu_deltas.max()
+        if max_delta < 1e-10:
+            load_uniformity = 0.5
+        else:
+            load_uniformity = float(np.clip(cpu_deltas.min() / max_delta, 0.0, 1.0))
+
+        # --- periodicity_strength (replaces time_seasonality) ---
+        # Max autocorrelation of mean CPU at lags 2-30.
+        mean_cpu = np.mean(
+            [svc.metrics["cpu_usage"].values for svc in services], axis=0,
+        )
+        n_ts = len(mean_cpu)
+        if n_ts > 30:
+            centered = mean_cpu - np.mean(mean_cpu)
+            var = np.var(mean_cpu)
+            if var < 1e-10:
+                periodicity_strength = 0.0
+            else:
+                max_lag = min(30, n_ts // 2)
+                acf_vals = []
+                for lag in range(2, max_lag + 1):
+                    acf = np.mean(centered[:-lag] * centered[lag:]) / var
+                    acf_vals.append(abs(acf))
+                periodicity_strength = float(np.clip(max(acf_vals) if acf_vals else 0.0, 0.0, 1.0))
+        else:
+            periodicity_strength = 0.5
+
+        # --- correlation_coherence (replaces recent_deployment) ---
+        # 1 - std of per-service pearsonr(cpu, request_rate).
+        # High = normal coupling preserved, Low = decoupled (fault).
+        correlations = []
+        for svc in services:
+            cpu = svc.metrics["cpu_usage"].values
+            req = svc.metrics["request_rate"].values
+            if np.std(cpu) < 1e-10 or np.std(req) < 1e-10:
+                continue
+            r = np.corrcoef(cpu, req)[0, 1]
+            if np.isfinite(r):
+                correlations.append(r)
+        if len(correlations) >= 2:
+            correlation_coherence = float(np.clip(1.0 - np.std(correlations), 0.0, 1.0))
+        else:
+            correlation_coherence = 0.5
+
+        # --- regime_stability (replaces context_confidence) ---
+        # 1 / (1 + n_change_points). Stable = high, volatile = low.
+        # Use magnitude as a proxy: high magnitude = significant change = less stable.
+        try:
+            magnitudes = []
+            for svc in services:
+                cpu = svc.metrics["cpu_usage"].values
+                if len(cpu) > 10:
+                    _, mag, _ = _detect_change_point_cached(tuple(cpu))
+                    magnitudes.append(mag)
+            if magnitudes:
+                # Normalize: high avg magnitude → low stability
+                avg_mag = np.mean(magnitudes)
+                regime_stability = float(np.clip(1.0 / (1.0 + avg_mag), 0.0, 1.0))
+            else:
+                regime_stability = 0.5
+        except Exception:
+            regime_stability = 0.5
+
+        return np.array([
+            anomaly_gini,
+            load_uniformity,
+            periodicity_strength,
+            correlation_coherence,
+            regime_stability,
+        ])
+
+    # ------------------------------------------------------------------
+    # Comparison-based context features (5)
+    # ------------------------------------------------------------------
+
+    def _comparison_context_features(
+        self,
+        services: Optional[List[ServiceMetrics]] = None,
+        reference_services: Optional[List[ServiceMetrics]] = None,
+    ) -> np.ndarray:
+        """Compute context features by comparing anomalous window to reference baseline.
+
+        Returns 5 features in [0, 1]:
+            cpu_deviation         — cosine distance between per-service mean CPU vectors
+            error_rate_ratio      — how much worse errors got vs reference
+            correlation_shift     — change in mean pairwise inter-service CPU correlation
+            latency_deviation     — L2 distance of per-service mean latency vectors (normalized)
+            baseline_confidence   — stability/trustworthiness of reference (1 / (1 + mean_std))
+
+        When ``reference_services`` is None, returns ``[0.5, 0.5, 0.5, 0.5, 0.5]``.
+        """
+        if reference_services is None or len(reference_services) == 0:
+            return np.array([0.5, 0.5, 0.5, 0.5, 0.5])
+
+        if services is None or len(services) == 0:
+            return np.array([0.5, 0.5, 0.5, 0.5, 0.5])
+
+        # ---- 1. cpu_deviation: cosine distance between mean CPU vectors ----
+        case_cpu = np.array([
+            float(np.mean(svc.metrics["cpu_usage"].values)) for svc in services
+        ])
+        ref_cpu = np.array([
+            float(np.mean(svc.metrics["cpu_usage"].values)) for svc in reference_services
+        ])
+        # Pad shorter vector with zeros so they are the same length
+        max_len = max(len(case_cpu), len(ref_cpu))
+        if len(case_cpu) < max_len:
+            case_cpu = np.pad(case_cpu, (0, max_len - len(case_cpu)))
+        if len(ref_cpu) < max_len:
+            ref_cpu = np.pad(ref_cpu, (0, max_len - len(ref_cpu)))
+
+        cosine_sim = np.dot(case_cpu, ref_cpu) / (
+            np.linalg.norm(case_cpu) * np.linalg.norm(ref_cpu) + 1e-10
+        )
+        cpu_deviation = float(np.clip(1.0 - cosine_sim, 0.0, 1.0))
+
+        # ---- 2. error_rate_ratio: how much worse errors got ----
+        case_max_err = max(
+            float(svc.metrics["error_rate"].max()) for svc in services
+        )
+        ref_max_err = max(
+            float(svc.metrics["error_rate"].max()) for svc in reference_services
+        )
+        raw_ratio = case_max_err / (ref_max_err + 1e-10)
+        # Cap at 100x then normalize to [0, 1]
+        error_rate_ratio = float(np.clip(raw_ratio / 100.0, 0.0, 1.0))
+
+        # ---- 3. correlation_shift: change in mean pairwise CPU correlation ----
+        def _mean_pairwise_corr(svcs: List[ServiceMetrics]) -> float:
+            if len(svcs) < 2:
+                return 0.0
+            min_len = min(len(svc.metrics["cpu_usage"].values) for svc in svcs)
+            if min_len < 2:
+                return 0.0
+            cpu_matrix = np.array([svc.metrics["cpu_usage"].values[:min_len] for svc in svcs])
+            stds = np.std(cpu_matrix, axis=1)
+            non_const = stds > 0
+            if non_const.sum() < 2:
+                return 0.0
+            cpu_filtered = cpu_matrix[non_const]
+            corr_matrix = np.corrcoef(cpu_filtered)
+            n_filt = len(cpu_filtered)
+            upper = corr_matrix[np.triu_indices(n_filt, k=1)]
+            return float(np.mean(upper)) if len(upper) > 0 else 0.0
+
+        case_corr = _mean_pairwise_corr(services)
+        ref_corr = _mean_pairwise_corr(reference_services)
+        correlation_shift = float(np.clip(abs(case_corr - ref_corr), 0.0, 1.0))
+
+        # ---- 4. latency_deviation: normalized L2 distance of mean latency vectors ----
+        case_lat = np.array([
+            float(np.mean(svc.metrics["latency"].values)) for svc in services
+        ])
+        ref_lat = np.array([
+            float(np.mean(svc.metrics["latency"].values)) for svc in reference_services
+        ])
+        # Pad to same length
+        max_lat_len = max(len(case_lat), len(ref_lat))
+        if len(case_lat) < max_lat_len:
+            case_lat = np.pad(case_lat, (0, max_lat_len - len(case_lat)))
+        if len(ref_lat) < max_lat_len:
+            ref_lat = np.pad(ref_lat, (0, max_lat_len - len(ref_lat)))
+
+        l2_dist = float(np.linalg.norm(case_lat - ref_lat))
+        max_latency = float(np.max(np.concatenate([case_lat, ref_lat])))
+        latency_deviation = float(np.clip(l2_dist / (max_latency + 1e-10), 0.0, 1.0))
+
+        # ---- 5. baseline_confidence: stability of reference CPU ----
+        ref_cpu_stds = [
+            float(np.std(svc.metrics["cpu_usage"].values)) for svc in reference_services
+        ]
+        mean_std = float(np.mean(ref_cpu_stds)) if ref_cpu_stds else 0.0
+        baseline_confidence = float(1.0 / (1.0 + mean_std))
+
+        return np.array([
+            cpu_deviation,
+            error_rate_ratio,
+            correlation_shift,
+            latency_deviation,
+            baseline_confidence,
+        ])
+
+    # ------------------------------------------------------------------
+    # External context features (5) — original behavior
     #
     # NOTE: Context features are intentionally noisy to prevent label
     # leakage.  Without noise, ``event_active`` would be a perfect proxy

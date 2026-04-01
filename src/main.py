@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import yaml
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from src.utils import NaNSafeScaler
 
 # Fallback for running without `pip install -e .`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -270,7 +270,7 @@ def run_pipeline(
     scaler = None
     if model_type in ("caaa", "mlp"):
         print("  Applying StandardScaler (fit on train split only)...")
-        scaler = StandardScaler()
+        scaler = NaNSafeScaler()
         X_train = scaler.fit_transform(X_train)
         X_val = scaler.transform(X_val)
         X_cal = scaler.transform(X_cal)
@@ -422,7 +422,8 @@ def main() -> None:
 
     if args.download_data:
         from src.data_loader.download_data import download_rcaeval_dataset
-        download_rcaeval_dataset(args.dataset, args.system, args.data_dir)
+        for ds in args.dataset:
+            download_rcaeval_dataset(ds, args.system, args.data_dir)
         return
 
     run_pipeline(

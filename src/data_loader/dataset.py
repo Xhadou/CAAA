@@ -51,27 +51,60 @@ def generate_combined_dataset(
     fault_cases: List[AnomalyCase] = []
     load_cases: List[AnomalyCase] = []
 
-    # Generate fault cases
+    # Generate fault cases with mixed severity levels.
+    # Low-severity faults produce subtle error increases that overlap with
+    # load-induced errors, forcing the model to rely on context features.
+    _SEVERITY_DIST = [("low", 0.35), ("medium", 0.35), ("high", 0.30)]
+
     logger.info("Generating %d fault cases", n_fault)
     for i in range(n_fault):
         system = systems[i % len(systems)]
         case_seed = seed * _CASE_SEED_MULT + i
-        services, fault_service, fault_type = fault_gen.generate_fault_metrics(
-            system=system, case_seed=case_seed,
-        )
-        fault_context = {}
-        if rng.random() < 0.3:
-            fault_context["recent_deployment"] = True
-        # 30% of fault cases get a fake context with event_type to prevent
-        # event_active from being a perfect proxy for the label.
-        if rng.random() < 0.30:
-            fake_event = str(rng.choice([
-                "flash_sale", "marketing_campaign", "scheduled_batch",
-            ]))
-            fault_context["event_type"] = fake_event
-            fault_context["event_name"] = f"{fake_event}_event"
-            fault_context["load_multiplier"] = float(
-                rng.uniform(1.2, 2.5)
+
+        # Assign severity based on distribution
+        roll = rng.random()
+        if roll < _SEVERITY_DIST[0][1]:
+            severity = "low"
+            difficulty = "hard"
+        elif roll < _SEVERITY_DIST[0][1] + _SEVERITY_DIST[1][1]:
+            severity = "medium"
+            difficulty = "medium"
+        else:
+            severity = "high"
+            difficulty = "easy"
+
+        if severity == "low":
+            # Disguised fault: mimics load spike pattern, empty context
+            services, fault_service, fault_type = fault_gen.generate_disguised_fault(
+                system=system, case_seed=case_seed,
+            )
+            fault_context = {}
+        else:
+            services, fault_service, fault_type = fault_gen.generate_fault_metrics(
+                system=system, case_seed=case_seed, severity=severity,
+            )
+            fault_context = {}
+            if rng.random() < 0.3:
+                fault_context["recent_deployment"] = True
+            # 30% of fault cases get a fake context with event_type to prevent
+            # event_active from being a perfect proxy for the label.
+            if rng.random() < 0.30:
+                fake_event = str(rng.choice([
+                    "flash_sale", "marketing_campaign", "scheduled_batch",
+                ]))
+                fault_context["event_type"] = fake_event
+                fault_context["event_name"] = f"{fake_event}_event"
+                fault_context["load_multiplier"] = float(
+                    rng.uniform(1.2, 2.5)
+                )
+        # Counterfactual baseline: same seed, no injection
+        if severity == "low":
+            reference_services = fault_gen.generate_counterfactual_disguised(
+                case_seed=case_seed, system=system,
+            )
+        else:
+            reference_services = fault_gen.generate_counterfactual_fault(
+                case_seed=case_seed, system=system, severity=severity,
             )
         fault_cases.append(
             AnomalyCase(
@@ -82,10 +115,15 @@ def generate_combined_dataset(
                 context=fault_context,
                 fault_service=fault_service,
                 fault_type=fault_type,
+                difficulty=difficulty,
+                reference_services=reference_services,
             )
         )
 
-    # Generate expected-load cases
+    # Generate expected-load cases.
+    # Load spikes now produce proportional error increases (via A2),
+    # so high-multiplier loads are "hard" (their errors overlap with
+    # low-severity faults).
     logger.info("Generating %d expected-load cases", n_load)
     for i in range(n_load):
         system = systems[i % len(systems)]
@@ -93,10 +131,23 @@ def generate_combined_dataset(
         services, context = load_gen.generate_load_spike_metrics(
             system=system, case_seed=case_seed,
         )
+        # Assign difficulty based on load multiplier
+        mult = context.get("load_multiplier", 1.0)
+        if mult >= 4.0:
+            load_difficulty = "hard"
+        elif mult >= 2.5:
+            load_difficulty = "medium"
+        else:
+            load_difficulty = "easy"
+
         # 30% of load cases get empty context (simulating unscheduled load
         # spikes with no calendar entry) to prevent label leakage.
         if rng.random() < 0.30:
             context = {}
+        # Counterfactual baseline: same seed, no load injection
+        reference_services = load_gen.generate_counterfactual_load(
+            case_seed=case_seed, system=system,
+        )
         load_cases.append(
             AnomalyCase(
                 case_id=f"load_{i:04d}",
@@ -104,6 +155,8 @@ def generate_combined_dataset(
                 label="EXPECTED_LOAD",
                 services=services,
                 context=context,
+                difficulty=load_difficulty,
+                reference_services=reference_services,
             )
         )
 
@@ -205,11 +258,25 @@ def generate_rcaeval_dataset(
     n_load_per_fault: int = 1,
     data_dir: str = "data/raw",
     seed: int = 42,
+    split_mode: str = "pre_injection",
 ) -> Tuple[List[AnomalyCase], List[AnomalyCase]]:
-    """Load FAULT cases from RCAEval and generate matching EXPECTED_LOAD cases.
+    """Load FAULT cases from RCAEval and produce matching EXPECTED_LOAD cases.
 
-    This is the intended research pipeline: real fault data from the RCAEval
-    benchmark paired with synthetic expected-load cases for attribution training.
+    Two modes are supported via *split_mode*:
+
+    * ``"pre_injection"`` (default): calls
+      :meth:`RCAEvalLoader.load_dataset_split` which splits each real
+      recording at its injection timestamp.  The post-injection window
+      becomes a FAULT case and the pre-injection window becomes an
+      EXPECTED_LOAD case.  Both halves come from the same real recording,
+      avoiding distribution mismatch.  *n_load_per_fault* is ignored in
+      this mode.
+
+    * ``"synthetic"``: loads all FAULT cases via
+      :meth:`RCAEvalLoader.load_dataset`, then generates
+      *n_load_per_fault* synthetic EXPECTED_LOAD cases per fault case
+      using :class:`SyntheticMetricsGenerator`.  This was the original
+      behaviour.
 
     Args:
         dataset: RCAEval dataset identifier(s). A single string like ``"RE1"``
@@ -218,8 +285,10 @@ def generate_rcaeval_dataset(
             ``"online-boutique"`` or a list like
             ``["online-boutique", "sock-shop", "train-ticket"]``.
         n_load_per_fault: Number of synthetic load cases per fault case.
+            Only used when *split_mode* is ``"synthetic"``.
         data_dir: Path to downloaded RCAEval data.
-        seed: Random seed.
+        seed: Random seed (used only in ``"synthetic"`` mode).
+        split_mode: One of ``"pre_injection"`` or ``"synthetic"``.
 
     Returns:
         Tuple of (fault_cases, load_cases) as AnomalyCase lists.
@@ -227,57 +296,101 @@ def generate_rcaeval_dataset(
     Raises:
         FileNotFoundError: If none of the requested RCAEval combinations
             contain data.
+        ValueError: If *split_mode* is not a recognised value.
     """
     from src.data_loader.rcaeval_loader import RCAEvalLoader
+
+    if split_mode not in ("pre_injection", "synthetic"):
+        raise ValueError(
+            f"split_mode must be 'pre_injection' or 'synthetic', got {split_mode!r}"
+        )
 
     datasets = [dataset] if isinstance(dataset, str) else list(dataset)
     systems = [system] if isinstance(system, str) else list(system)
 
     loader = RCAEvalLoader(data_dir=data_dir)
     fault_cases: List[AnomalyCase] = []
-
-    for ds in datasets:
-        for sys_name in systems:
-            try:
-                cases = loader.load_dataset(dataset=ds, system=sys_name)
-            except FileNotFoundError:
-                logger.warning("No data at %s/%s/%s — skipping", data_dir, ds, sys_name)
-                continue
-            if cases:
-                logger.info("Loaded %d fault cases from RCAEval %s/%s", len(cases), ds, sys_name)
-                fault_cases.extend(cases)
-            else:
-                logger.warning("Empty dataset for %s/%s — skipping", ds, sys_name)
-
-    if not fault_cases:
-        raise FileNotFoundError(
-            f"No RCAEval data found for datasets={datasets}, systems={systems} "
-            f"in {data_dir}. Download the data first."
-        )
-
-    # Generate synthetic EXPECTED_LOAD cases
-    load_gen = SyntheticMetricsGenerator(seed=seed)
     load_cases: List[AnomalyCase] = []
 
-    for i, fault_case in enumerate(fault_cases):
-        for j in range(n_load_per_fault):
-            services, context = load_gen.generate_load_spike_metrics(
-                system=fault_case.system,
-            )
-            load_cases.append(
-                AnomalyCase(
-                    case_id=f"load_rcaeval_{i:04d}_{j:02d}",
-                    system=fault_case.system,
-                    label="EXPECTED_LOAD",
-                    services=services,
-                    context=context,
-                )
+    if split_mode == "pre_injection":
+        for ds in datasets:
+            for sys_name in systems:
+                try:
+                    ds_faults, ds_normals = loader.load_dataset_split(
+                        dataset=ds, system=sys_name, seed=seed,
+                    )
+                except FileNotFoundError:
+                    logger.warning(
+                        "No data at %s/%s/%s — skipping", data_dir, ds, sys_name
+                    )
+                    continue
+                if ds_faults or ds_normals:
+                    logger.info(
+                        "Loaded %d fault / %d normal cases from RCAEval %s/%s",
+                        len(ds_faults), len(ds_normals), ds, sys_name,
+                    )
+                    fault_cases.extend(ds_faults)
+                    load_cases.extend(ds_normals)
+                else:
+                    logger.warning("Empty dataset for %s/%s — skipping", ds, sys_name)
+
+        if not fault_cases and not load_cases:
+            raise FileNotFoundError(
+                f"No RCAEval data found for datasets={datasets}, systems={systems} "
+                f"in {data_dir}. Download the data first."
             )
 
-    logger.info(
-        "RCAEval dataset: %d real faults + %d synthetic loads = %d total",
-        len(fault_cases), len(load_cases), len(fault_cases) + len(load_cases),
-    )
+        logger.info(
+            "RCAEval dataset (pre_injection): %d fault cases + %d normal cases = %d total",
+            len(fault_cases), len(load_cases), len(fault_cases) + len(load_cases),
+        )
+
+    else:  # split_mode == "synthetic"
+        for ds in datasets:
+            for sys_name in systems:
+                try:
+                    cases = loader.load_dataset(dataset=ds, system=sys_name)
+                except FileNotFoundError:
+                    logger.warning(
+                        "No data at %s/%s/%s — skipping", data_dir, ds, sys_name
+                    )
+                    continue
+                if cases:
+                    logger.info(
+                        "Loaded %d fault cases from RCAEval %s/%s", len(cases), ds, sys_name
+                    )
+                    fault_cases.extend(cases)
+                else:
+                    logger.warning("Empty dataset for %s/%s — skipping", ds, sys_name)
+
+        if not fault_cases:
+            raise FileNotFoundError(
+                f"No RCAEval data found for datasets={datasets}, systems={systems} "
+                f"in {data_dir}. Download the data first."
+            )
+
+        # Generate synthetic EXPECTED_LOAD cases
+        load_gen = SyntheticMetricsGenerator(seed=seed)
+        for i, fault_case in enumerate(fault_cases):
+            for j in range(n_load_per_fault):
+                services, context = load_gen.generate_load_spike_metrics(
+                    system=fault_case.system,
+                )
+                load_cases.append(
+                    AnomalyCase(
+                        case_id=f"load_rcaeval_{i:04d}_{j:02d}",
+                        system=fault_case.system,
+                        label="EXPECTED_LOAD",
+                        services=services,
+                        context=context,
+                    )
+                )
+
+        logger.info(
+            "RCAEval dataset (synthetic): %d real faults + %d synthetic loads = %d total",
+            len(fault_cases), len(load_cases), len(fault_cases) + len(load_cases),
+        )
+
     return fault_cases, load_cases
 
 

@@ -221,7 +221,11 @@ The CAAA trainer includes several features for stable, reproducible training:
 - **Gradient clipping** (default `max_grad_norm=1.0`): Prevents exploding gradients during training.
 - **ReduceLROnPlateau scheduler**: Automatically halves the learning rate when validation loss stops improving.
 - **Temperature calibration**: Post-hoc temperature scaling for calibrated confidence scores.
-- **StandardScaler**: Input features should be standardized before training. The entry points handle this automatically.
+- **NaNSafeScaler**: Wraps StandardScaler to handle zero-variance features (replaces NaN/inf with 0.0).
+- **Piecewise Linear Embeddings (PLE)**: Each feature is transformed into quantile-based bin encodings, giving the MLP tree-like threshold capability.
+- **TADAM-style FiLM conditioning**: Gamma constrained to 1 + delta with L2 penalty, preventing multiplicative noise amplification.
+- **Feature-group dropout**: Context features (slots 12-16) zeroed with 30% probability during training, forcing the model to learn from metrics alone.
+- **Counterfactual baselines**: Reference baselines generated with the same RNG seed but no fault/load injection, providing genuine "what would normal look like?" comparisons.
 - **Reproducible RNG**: All data generators use instance-level `np.random.default_rng(seed)` — multiple generators can coexist in the same process without corrupting each other's random state. Per-case seeds further ensure that generation order does not create statistical dependence between data splits.
 - **Unscaled tree-based baselines**: When the `--baseline` flag is used, tree-based models (RandomForest, XGBoost) are trained on unscaled features, consistent with their scale-invariant nature. Only neural models (CAAA) receive StandardScaler-transformed features.
 
@@ -238,6 +242,10 @@ The CAAA trainer includes several features for stable, reproducible training:
 | `--baseline` | off | Also train a Random Forest baseline |
 | `--shap` | off | Generate SHAP feature importance plots |
 | `--config` | — | Path to a YAML config file |
+| `--loss-variant` | gated | Loss penalty variant: `gated`, `clamp`, or `full` |
+| `--film-mode` | tadam | FiLM conditioning: `tadam`, `additive`, or `multiplicative` |
+| `--context-dropout` | 0.3 | Probability of zeroing context features during training |
+| `--unknown-weight` | 0.2 | Weight for unknown-context penalty |
 
 ### Using a Config File
 
@@ -675,40 +683,35 @@ python -m src.main --n-fault 50 --n-load 50 --model rule_based
 python scripts/ablation.py \
     --n-fault 100 --n-load 100 \
     --epochs 50 --n-runs 5 \
-    --shap --calibration
+    --shap --calibration --include-hard
 
 # 6. Review results
-cat outputs/results/ablation_results.csv
+cat outputs/results/ablation_results_synthetic.csv
 ```
 
 ### Phase 4: Real-World Validation (~20 min)
 
 ```bash
-# 7. Download and evaluate on RCAEval
-python -m src.main --download-data --dataset RE1 --system online-boutique
-python -m src.main --data rcaeval --dataset RE1 --system online-boutique --model caaa
+# 7. Download and evaluate on RCAEval (all datasets/systems)
+python -m src.main --download-data --dataset all --system all
 
-# 8. Ablation on real data
-python scripts/ablation.py --data rcaeval --dataset RE1 --system online-boutique \
-    --epochs 50 --n-runs 5
-
-# 9. Evaluate on RE3 dataset
-python -m src.main --download-data --dataset RE3 --system online-boutique
-python -m src.main --data rcaeval --dataset RE3 --system online-boutique --model caaa
+# 8. Ablation on all real data (per-system + combined summary)
+python scripts/ablation.py --data rcaeval --dataset all --system all \
+    --epochs 50 --n-runs 10
 ```
 
-### Phase 5: Paper-Quality Results (~60–90 min)
+### Phase 5: Paper-Quality Results (~2–3 hours)
 
 ```bash
-# 9. High-quality ablation with all analyses
+# 9. High-quality synthetic ablation with all analyses
 python scripts/ablation.py \
     --n-fault 200 --n-load 200 \
     --epochs 100 --n-runs 10 \
     --shap --calibration --include-hard
 
-# 10. Full pipeline with anomaly detector
-python -m src.main --data rcaeval --dataset RE1 --system online-boutique \
-    --model caaa --anomaly-detector --ad-epochs 50
+# 10. Full RCAEval ablation across all datasets and systems
+python scripts/ablation.py --data rcaeval --dataset all --system all \
+    --epochs 50 --n-runs 10
 ```
 
 ---

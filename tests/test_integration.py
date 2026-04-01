@@ -161,9 +161,9 @@ class TestContextConsistencyLoss:
                 assert torch.isfinite(param.grad).all(), f"Non-finite gradient for {name}"
 
     def test_context_consistency_loss_ablation(self):
-        """Without context loss (alpha=0, beta=0), should equal CrossEntropyLoss."""
+        """Without context loss (alpha=0, beta=0, unknown_weight=0), should equal CrossEntropyLoss."""
         torch.manual_seed(42)
-        ccl = ContextConsistencyLoss(alpha=0.0, beta=0.0)
+        ccl = ContextConsistencyLoss(alpha=0.0, beta=0.0, unknown_weight=0.0)
         ce = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
         logits = torch.randn(8, 2)
@@ -175,8 +175,12 @@ class TestContextConsistencyLoss:
 
         npt.assert_allclose(total_loss.item(), ce_loss.item(), atol=1e-6)
 
-    def test_context_confidence_zero_nullifies_consistency(self):
-        """When context_confidence=0 for all samples, consistency_loss should be ~0."""
+    def test_context_confidence_zero_still_produces_consistency(self):
+        """When context_confidence=0 for all samples, consistency_loss should still be positive.
+
+        The clamp(min=0.3) floor ensures disguised faults (zero confidence)
+        still receive a gradient signal — this is the corrected behavior.
+        """
         torch.manual_seed(42)
         ccl = ContextConsistencyLoss(alpha=0.3, beta=0.1)
 
@@ -187,8 +191,14 @@ class TestContextConsistencyLoss:
 
         _, components = ccl(logits, labels, context)
 
-        npt.assert_allclose(components["consistency_loss"], 0.0, atol=1e-7)
+        # consistency_loss is now floored at 0.3 * penalty > 0 even when confidence=0
+        assert components["consistency_loss"] > 0.0, (
+            "consistency_loss should be positive for zero-confidence samples due to clamp(min=0.3)"
+        )
+        # calibration_loss is still zero because it is weighted by raw context_confidence (not clamped)
         npt.assert_allclose(components["calibration_loss"], 0.0, atol=1e-7)
+        # unknown_penalty should be non-negative
+        assert components["unknown_penalty"] >= 0.0
 
 
 class TestTemperatureScaling:

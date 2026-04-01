@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.preprocessing import StandardScaler
+from src.utils import NaNSafeScaler
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -103,7 +103,7 @@ class AnomalyDetector:
         self.threshold_percentile = threshold_percentile
 
         self.model: Optional[LSTMAutoencoder] = None
-        self.scaler = StandardScaler()
+        self.scaler = NaNSafeScaler()
         self.threshold: Optional[float] = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -259,8 +259,8 @@ class AnomalyDetector:
             raise RuntimeError("Model not trained yet — call fit() first.")
         torch.save({
             "model_state": self.model.state_dict(),
-            "scaler_mean": torch.as_tensor(self.scaler.mean_),
-            "scaler_scale": torch.as_tensor(self.scaler.scale_),
+            "scaler_mean": torch.as_tensor(self.scaler._scaler.mean_),
+            "scaler_scale": torch.as_tensor(self.scaler._scaler.scale_),
             "threshold": self.threshold,
             "config": {
                 "hidden_dim": self.hidden_dim,
@@ -280,9 +280,11 @@ class AnomalyDetector:
             num_layers=cfg["num_layers"],
         ).to(self.device)
         self.model.load_state_dict(checkpoint["model_state"])
-        self.scaler = StandardScaler()
-        self.scaler.mean_ = checkpoint["scaler_mean"].cpu().numpy() if isinstance(checkpoint["scaler_mean"], torch.Tensor) else checkpoint["scaler_mean"]
-        self.scaler.scale_ = checkpoint["scaler_scale"].cpu().numpy() if isinstance(checkpoint["scaler_scale"], torch.Tensor) else checkpoint["scaler_scale"]
-        self.scaler.var_ = self.scaler.scale_ ** 2
-        self.scaler.n_features_in_ = n_features
+        self.scaler = NaNSafeScaler()
+        scaler_mean = checkpoint["scaler_mean"].cpu().numpy() if isinstance(checkpoint["scaler_mean"], torch.Tensor) else checkpoint["scaler_mean"]
+        scaler_scale = checkpoint["scaler_scale"].cpu().numpy() if isinstance(checkpoint["scaler_scale"], torch.Tensor) else checkpoint["scaler_scale"]
+        self.scaler._scaler.mean_ = scaler_mean
+        self.scaler._scaler.scale_ = scaler_scale
+        self.scaler._scaler.var_ = scaler_scale ** 2
+        self.scaler._scaler.n_features_in_ = n_features
         self.threshold = checkpoint["threshold"]

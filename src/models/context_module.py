@@ -41,6 +41,7 @@ class ContextIntegrationModule(nn.Module):
         temporal_dim: int = 64,
         context_dim: int = 5,
         hidden_dim: int = 32,
+        film_mode: str = "tadam",
     ) -> None:
         """Initializes the ContextIntegrationModule.
 
@@ -48,11 +49,16 @@ class ContextIntegrationModule(nn.Module):
             temporal_dim: Dimensionality of temporal encoding.
             context_dim: Number of context features (default 5).
             hidden_dim: Hidden dimensionality for context encoder.
+            film_mode: FiLM conditioning mode. One of ``"multiplicative"``
+                (original), ``"additive"`` (beta only), or ``"tadam"``
+                (identity-initialised multiplicative delta).
         """
         super().__init__()
         self.temporal_dim = temporal_dim
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim
+        self.film_mode = film_mode
+        self.last_delta = None
 
         # 1. Context encoder: context_dim -> hidden_dim -> hidden_dim
         self.context_encoder = nn.Sequential(
@@ -66,6 +72,9 @@ class ContextIntegrationModule(nn.Module):
 
         # 2. FiLM conditioning: gamma (scale) and beta (shift)
         self.film_gamma = nn.Linear(hidden_dim, temporal_dim)
+        if self.film_mode == "tadam":
+            nn.init.zeros_(self.film_gamma.weight)
+            nn.init.zeros_(self.film_gamma.bias)
         self.film_beta = nn.Linear(hidden_dim, temporal_dim)
 
         # 3. Confidence gating (uses context_confidence, event_active, recent_deployment)
@@ -73,9 +82,10 @@ class ContextIntegrationModule(nn.Module):
             nn.Linear(3, 1),
             nn.Sigmoid(),
         )
-        # Bias=1.0 → initial sigmoid output ≈ 0.73, allowing context through
-        # by default rather than starting at an uninformative ~0.5.
-        nn.init.constant_(self.confidence_gate[0].bias, 1.0)
+        # Bias=-1.0 → initial sigmoid output ≈ 0.27, skeptical of context
+        # by default.  The model must learn to trust context signal, preventing
+        # over-reliance on noisy context features early in training.
+        nn.init.constant_(self.confidence_gate[0].bias, -1.0)
 
         # 4. Output projection + residual
         self.output_projection = nn.Linear(temporal_dim, temporal_dim)
@@ -105,9 +115,17 @@ class ContextIntegrationModule(nn.Module):
         context_encoded = self.context_encoder(context_features)
 
         # 2. FiLM conditioning: modulate temporal features
-        gamma = self.film_gamma(context_encoded)  # (batch, temporal_dim)
         beta = self.film_beta(context_encoded)    # (batch, temporal_dim)
-        modulated = gamma * temporal_features + beta
+        if self.film_mode == "additive":
+            modulated = temporal_features + beta
+        elif self.film_mode == "tadam":
+            delta = self.film_gamma(context_encoded)
+            self.last_delta = delta
+            gamma = 1.0 + delta
+            modulated = gamma * temporal_features + beta
+        else:  # "multiplicative" (original)
+            gamma = self.film_gamma(context_encoded)
+            modulated = gamma * temporal_features + beta
 
         # 3. Confidence gating using context_confidence, event_active, recent_deployment
         gate_input = torch.cat([

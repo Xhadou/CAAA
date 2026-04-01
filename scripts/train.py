@@ -10,7 +10,6 @@ import numpy as np
 import yaml
 import torch
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 
 # Fallback for running without `pip install -e .`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -25,7 +24,7 @@ from src.evaluation.metrics import (
     print_evaluation_summary,
 )
 from src.features.feature_schema import N_FEATURES
-from src.utils import set_seed, resolve_device
+from src.utils import set_seed, resolve_device, NaNSafeScaler
 
 
 def main():
@@ -73,8 +72,22 @@ def main():
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cpu", "cuda"],
                         help="Device for training (auto detects CUDA)")
+    parser.add_argument("--unknown-weight", type=float, default=0.2,
+                        help="Weight for unknown-context penalty in ContextConsistencyLoss")
+    parser.add_argument("--loss-variant", type=str, default="gated",
+                        choices=["clamp", "gated", "full"],
+                        help="ContextConsistencyLoss penalty variant")
+    parser.add_argument("--film-mode", type=str, default="tadam",
+                        choices=["multiplicative", "additive", "tadam"],
+                        help="FiLM conditioning mode")
+    parser.add_argument("--context-dropout", type=float, default=0.3,
+                        help="Probability of zeroing out context features during training")
 
     args = parser.parse_args()
+
+    # Auto-clamp context loss on real data
+    if args.data == "rcaeval" and args.loss_variant == "gated":
+        args.loss_variant = "clamp"
 
     # Load config if provided
     if args.config:
@@ -143,7 +156,8 @@ def main():
     print(f"Dataset: {len(fault_cases)} faults, {len(load_cases)} load spikes")
 
     # Extract features
-    extractor = FeatureExtractor()
+    ctx_mode = "external" if args.data == "synthetic" else "comparison"
+    extractor = FeatureExtractor(context_mode=ctx_mode)
     X = extractor.extract_batch(all_cases).astype(np.float32)
     print(f"Features: {X.shape}")
 
@@ -165,7 +179,7 @@ def main():
     X_train_unscaled, X_test_unscaled = X_train.copy(), X_test.copy()
 
     # Scale features (fit on train only) for neural models
-    scaler = StandardScaler()
+    scaler = NaNSafeScaler()
     X_train = scaler.fit_transform(X_train)
     X_val = scaler.transform(X_val)
     X_cal = scaler.transform(X_cal)
@@ -173,8 +187,11 @@ def main():
 
     # Train CAAA model
     print(f"Training CAAA model for {args.epochs} epochs...")
-    model = CAAAModel(input_dim=N_FEATURES)
-    trainer = CAAATrainer(model, learning_rate=args.lr, device=device)
+    model = CAAAModel(input_dim=N_FEATURES, film_mode=args.film_mode)
+    trainer = CAAATrainer(model, learning_rate=args.lr, device=device,
+                         unknown_weight=args.unknown_weight,
+                         loss_variant=args.loss_variant,
+                         context_dropout_p=args.context_dropout)
     trainer.train(
         X_train, y_train, X_val=X_val, y_val=y_val,
         epochs=args.epochs, batch_size=args.batch_size,

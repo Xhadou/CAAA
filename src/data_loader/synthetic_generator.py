@@ -212,9 +212,12 @@ class SyntheticMetricsGenerator:
                 1, 0, spike_end - ramp_down_start
             )
 
+        base_rng_seed = int(self.rng.integers(0, 2**63))
+        base_rng = np.random.default_rng(base_rng_seed)
+
         results: List[ServiceMetrics] = []
         for name in self.SERVICE_NAMES[: self.n_services]:
-            df = self._base_metrics(name)
+            df = generate_base_metrics(self.sequence_length, name, rng=base_rng)
 
             # Per-service multiplier jitter (±30%) for realistic variation
             svc_mult = 1.0 + (load_multiplier - 1.0) * envelope * self.rng.uniform(0.7, 1.3)
@@ -224,9 +227,11 @@ class SyntheticMetricsGenerator:
             df["network_in"] = np.clip(df["network_in"] * svc_mult, 0, None)
             df["network_out"] = np.clip(df["network_out"] * svc_mult, 0, None)
 
-            # Error rate stays stable — key differentiator from faults
-            err_mult = self.rng.uniform(err_lo, err_hi)
-            df["error_rate"] = np.clip(df["error_rate"] * err_mult, 0, 1)
+            # Error rate increases proportionally to load intensity.
+            # A 5x load spike might cause 0.008-0.04 error increase,
+            # overlapping with low-severity fault error increases.
+            err_increase = (load_multiplier - 1.0) * self.rng.uniform(0.002, 0.01) * envelope
+            df["error_rate"] = np.clip(df["error_rate"] + err_increase, 0, 1)
 
             results.append(ServiceMetrics(service_name=name, metrics=df))
 
@@ -243,3 +248,29 @@ class SyntheticMetricsGenerator:
             self.rng = original_rng
 
         return results, context
+
+    def generate_counterfactual_load(
+        self,
+        case_seed: int,
+        system: str = "online-boutique",
+    ) -> List[ServiceMetrics]:
+        """Generate counterfactual baseline: same seed as generate_load_spike_metrics, no injection."""
+        rng = np.random.default_rng(case_seed)
+
+        # Replay pre-loop RNG calls (matching generate_load_spike_metrics)
+        rng.choice(EVENT_TYPES)                # event_type
+        rng.uniform(0, 1)                            # load_multiplier (bounds don't affect state)
+        n = self.sequence_length
+        rng.uniform(0.10, 0.20)                      # ramp_frac
+        rng.integers(int(n * 0.15), int(n * 0.35))  # spike_start
+        rng.integers(int(n * 0.3), int(n * 0.5))    # spike_end
+
+        # Fork base_rng identically
+        base_rng_seed = int(rng.integers(0, 2**63))
+        base_rng = np.random.default_rng(base_rng_seed)
+
+        results: List[ServiceMetrics] = []
+        for name in self.SERVICE_NAMES[: self.n_services]:
+            df = generate_base_metrics(self.sequence_length, name, rng=base_rng)
+            results.append(ServiceMetrics(service_name=name, metrics=df))
+        return results

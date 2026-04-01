@@ -6,6 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 from src.data_loader.data_types import AnomalyCase, ServiceMetrics
@@ -337,6 +338,202 @@ class RCAEvalLoader:
 
         print(f"Loaded {len(cases)} failure cases from {dataset}/{system}")
         return cases
+
+    def load_dataset_split(
+        self,
+        dataset: str = "RE1",
+        system: str = "online-boutique",
+        fault_types: Optional[List[str]] = None,
+        seed: int = 42,
+    ) -> Tuple[List[AnomalyCase], List[AnomalyCase]]:
+        """Load RCAEval cases split at injection time into FAULT and NORMAL halves.
+
+        For each case directory, reads the metrics CSV and ``inject_time.txt``,
+        then splits the metrics DataFrame at the inject_time timestamp.  The
+        post-injection window becomes a FAULT case; the pre-injection window
+        becomes an EXPECTED_LOAD (normal) case.  Both halves originate from the
+        same real recording, avoiding distribution mismatch between FAULT and
+        NORMAL data.
+
+        Context is randomized to prevent label leakage: 70% of NORMAL cases
+        get context metadata, 30% get empty context.  30% of FAULT cases get
+        fake context, 70% get empty context.  This prevents ``event_active``
+        from being a perfect label proxy.
+
+        Cases without ``inject_time.txt`` are included as FAULT-only (no NORMAL
+        pair).  Splits where either half has fewer than 10 rows are skipped.
+
+        Args:
+            dataset: ``"RE1"``, ``"RE2"``, or ``"RE3"``.
+            system: Microservice system name.
+            fault_types: Filter by fault types. ``None`` returns all.
+            seed: Random seed for reproducible context randomization.
+
+        Returns:
+            Tuple of ``(fault_cases, normal_cases)`` as
+            ``Tuple[List[AnomalyCase], List[AnomalyCase]]``.
+        """
+        dataset_path = self.data_dir / dataset / system
+        if not dataset_path.exists():
+            raise FileNotFoundError(f"Dataset not found: {dataset_path}")
+
+        rng = np.random.default_rng(seed)
+        fault_cases: List[AnomalyCase] = []
+        normal_cases: List[AnomalyCase] = []
+
+        # ---- directory discovery (mirrors load_dataset) ----
+        case_dirs: List[Path] = []
+        for child in sorted(dataset_path.iterdir()):
+            if not child.is_dir():
+                continue
+            sub_dirs = [d for d in sorted(child.iterdir()) if d.is_dir()]
+            has_own_csv = any(child.glob("*.csv"))
+            if sub_dirs and not has_own_csv:
+                for svc_fault_dir in sub_dirs:
+                    instance_dirs = [d for d in sorted(svc_fault_dir.iterdir()) if d.is_dir()]
+                    if instance_dirs:
+                        for inst_dir in instance_dirs:
+                            case_dirs.append(inst_dir)
+                    else:
+                        case_dirs.append(svc_fault_dir)
+            else:
+                case_dirs.append(child)
+
+        for case_dir in case_dirs:
+            if case_dir.parent.parent != dataset_path:
+                case_name = case_dir.parent.name
+            else:
+                case_name = case_dir.name
+
+            info = self.parse_case_name(case_name)
+            if info["system"] == "unknown":
+                info["system"] = system
+            if fault_types and info["fault_type"] not in fault_types:
+                continue
+
+            metrics = self.load_metrics(case_dir)
+            if metrics.empty:
+                logger.warning("Empty metrics for case %s — skipping", case_dir.name)
+                continue
+
+            case_id = (
+                f"{case_name}_{case_dir.name}"
+                if case_dir.parent.parent != dataset_path
+                else case_dir.name
+            )
+
+            # ---- read inject_time ----
+            inject_time = None
+            inject_file = case_dir / "inject_time.txt"
+            if inject_file.exists():
+                try:
+                    inject_time = int(inject_file.read_text().strip())
+                except (ValueError, OSError):
+                    pass
+
+            if inject_time is None:
+                # No split possible — emit FAULT case for the full window
+                services = self.parse_wide_format(metrics)
+                fault_cases.append(
+                    AnomalyCase(
+                        case_id=case_id,
+                        system=info["system"],
+                        label="FAULT",
+                        services=services,
+                        context={},
+                        fault_service=info["service"],
+                        fault_type=info["fault_type"],
+                    )
+                )
+                continue
+
+            # ---- split on inject_time ----
+            # Determine the timestamp column
+            ts_col = None
+            for candidate in ("timestamp", "time", "ts"):
+                if candidate in metrics.columns:
+                    ts_col = candidate
+                    break
+
+            if ts_col is not None:
+                pre_df = metrics[metrics[ts_col] < inject_time].reset_index(drop=True)
+                post_df = metrics[metrics[ts_col] >= inject_time].reset_index(drop=True)
+            else:
+                # No timestamp column — split by row index at the midpoint
+                # (inject_time is treated as a row index)
+                pre_df = metrics.iloc[:inject_time].reset_index(drop=True)
+                post_df = metrics.iloc[inject_time:].reset_index(drop=True)
+
+            # Skip if either half is too short
+            if len(pre_df) < 10 or len(post_df) < 10:
+                logger.debug(
+                    "Skipping split for %s: pre=%d rows, post=%d rows",
+                    case_id, len(pre_df), len(post_df),
+                )
+                continue
+
+            # FAULT case: post-injection window
+            # 30% get fake context to prevent event_active from being
+            # a perfect label proxy (mirrors synthetic data's 30% rate).
+            fault_services = self.parse_wide_format(post_df)
+            reference_services = self.parse_wide_format(pre_df)
+            if rng.random() < 0.30:
+                fault_context = {
+                    "event_type": "maintenance_window",
+                    "context_confidence": 0.6,
+                }
+            else:
+                fault_context = {}
+            fault_cases.append(
+                AnomalyCase(
+                    case_id=f"{case_id}_fault",
+                    system=info["system"],
+                    label="FAULT",
+                    services=fault_services,
+                    context=fault_context,
+                    fault_service=info["service"],
+                    fault_type=info["fault_type"],
+                    reference_services=reference_services,
+                )
+            )
+
+            # NORMAL case: pre-injection window
+            # 70% get context, 30% get empty context to prevent
+            # context presence from being a perfect label proxy.
+            # Split pre-injection: first 25% as reference, last 75% as case
+            ref_split = int(len(pre_df) * 0.25)
+            if ref_split < 10:
+                # Too few rows for reference — use full pre_df as both
+                normal_services = self.parse_wide_format(pre_df)
+                normal_reference = normal_services
+            else:
+                ref_df = pre_df.iloc[:ref_split].reset_index(drop=True)
+                case_df = pre_df.iloc[ref_split:].reset_index(drop=True)
+                normal_services = self.parse_wide_format(case_df)
+                normal_reference = self.parse_wide_format(ref_df)
+            if rng.random() > 0.30:
+                normal_context = {
+                    "event_type": "normal_operation",
+                    "context_confidence": 0.8,
+                }
+            else:
+                normal_context = {}
+            normal_cases.append(
+                AnomalyCase(
+                    case_id=f"{case_id}_normal",
+                    system=info["system"],
+                    label="EXPECTED_LOAD",
+                    services=normal_services,
+                    context=normal_context,
+                    reference_services=normal_reference,
+                )
+            )
+
+        logger.info(
+            "load_dataset_split: %d fault cases, %d normal cases from %s/%s",
+            len(fault_cases), len(normal_cases), dataset, system,
+        )
+        return fault_cases, normal_cases
 
 
 def load_rcaeval(dataset: str = "RE1", system: str = "online-boutique") -> List[AnomalyCase]:

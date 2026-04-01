@@ -34,6 +34,7 @@ class CAAAModel(nn.Module):
         context_dim: int = 5,
         n_classes: int = 2,
         dropout: float = 0.1,
+        film_mode: str = "tadam",
     ) -> None:
         """Initializes the CAAAModel.
 
@@ -43,6 +44,9 @@ class CAAAModel(nn.Module):
             context_dim: Number of context features.
             n_classes: Number of output classes.
             dropout: Dropout probability.
+            film_mode: FiLM conditioning mode passed to
+                :class:`ContextIntegrationModule`. One of
+                ``"multiplicative"``, ``"additive"``, or ``"tadam"``.
         """
         super().__init__()
         self.input_dim = input_dim
@@ -56,6 +60,7 @@ class CAAAModel(nn.Module):
         self.context_module = ContextIntegrationModule(
             temporal_dim=hidden_dim,
             context_dim=context_dim,
+            film_mode=film_mode,
         )
         self.classifier = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
@@ -120,6 +125,14 @@ class CAAAModel(nn.Module):
         encoded_features = self.feature_encoder(x)
         integrated = self.context_module(encoded_features, context_features)
         return integrated
+
+    def set_bins(self, X_train) -> None:
+        """Set PLE bin edges from training data.
+
+        Args:
+            X_train: numpy array of shape (n_samples, n_features).
+        """
+        self.feature_encoder.set_bins(X_train)
 
     def predict(self, x: torch.Tensor) -> torch.Tensor:
         """Returns class predictions (argmax of softmax).

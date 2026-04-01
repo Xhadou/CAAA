@@ -41,3 +41,5 @@ class AnomalyCase:
     context: Optional[Dict] = field(default_factory=dict)
     fault_service: Optional[str] = None
     fault_type: Optional[str] = None
+    difficulty: Optional[str] = None
+    reference_services: Optional[List[ServiceMetrics]] = None

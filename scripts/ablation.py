@@ -9,7 +9,6 @@ import sys
 import numpy as np
 import torch
 from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.preprocessing import StandardScaler
 
 # Fallback for running without `pip install -e .`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -30,13 +29,14 @@ from src.evaluation.metrics import (
     compute_all_metrics,
     compute_false_positive_rate,
 )
-from src.utils import set_seed
+from src.utils import set_seed, NaNSafeScaler
 
 
 def run_caaa_variant(
     X_train, y_train, X_test, y_test, naive_fp, epochs, batch_size, lr,
     use_context_loss=True, loss_type="context_consistency", seed=42,
-    X_val=None, y_val=None,
+    X_val=None, y_val=None, unknown_weight=0.2, loss_variant="gated",
+    film_mode="tadam", context_dropout=0.3,
 ):
     """Train and evaluate a CAAA model variant.
 
@@ -55,17 +55,24 @@ def run_caaa_variant(
         seed: Random seed.
         X_val: Optional validation features for early stopping.
         y_val: Optional validation labels for early stopping.
+        film_mode: FiLM conditioning mode (multiplicative, additive, tadam).
+        context_dropout: Probability of zeroing out context features during
+            training.
 
     Returns:
         Dictionary of evaluation metrics.
     """
     torch.manual_seed(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+    model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2,
+                      film_mode=film_mode)
     trainer = CAAATrainer(
         model, learning_rate=lr, device=device,
         use_context_loss=use_context_loss,
         loss_type=loss_type,
+        unknown_weight=unknown_weight,
+        loss_variant=loss_variant,
+        context_dropout_p=context_dropout,
     )
     early_stopping_patience = 10 if X_val is not None else epochs
     trainer.train(
@@ -169,6 +176,103 @@ def run_catboost(X_train, y_train, X_test, y_test, naive_fp, seed=42):
     return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
 
 
+_SYSTEM_ABBREV = {
+    "online-boutique": "OB",
+    "sock-shop": "SS",
+    "train-ticket": "TT",
+}
+
+
+def merge_results(csv_paths):
+    """Merge per-system ablation CSVs into a combined summary table.
+
+    Args:
+        csv_paths: List of (dataset, system, csv_path) tuples.
+    """
+    import csv as _csv
+
+    # Read each CSV
+    per_system = {}
+    variants = None
+    for ds, sys_name, path in csv_paths:
+        if not os.path.exists(path):
+            print(f"  Warning: {path} not found, skipping")
+            continue
+        abbrev = f"{ds}_{_SYSTEM_ABBREV.get(sys_name, sys_name)}"
+        with open(path) as f:
+            reader = _csv.DictReader(f)
+            rows = list(reader)
+        if variants is None:
+            variants = [r["variant"] for r in rows]
+        per_system[abbrev] = {r["variant"]: r for r in rows}
+
+    if not per_system or not variants:
+        return
+
+    # Key metrics to show in combined table
+    key_metrics = ["f1_mean", "mcc_mean", "fp_rate_mean", "fault_recall_mean", "fp_reduction_mean"]
+
+    # Write combined CSV
+    combined_dir = "outputs/results"
+    combined_path = os.path.join(combined_dir, "ablation_results_combined.csv")
+    sys_keys = sorted(per_system.keys())
+
+    with open(combined_path, "w", newline="") as f:
+        writer = _csv.writer(f)
+        header = ["variant"]
+        for sk in sys_keys:
+            for m in key_metrics:
+                header.append(f"{sk}_{m}")
+        for m in key_metrics:
+            header.append(f"Avg_{m}")
+        writer.writerow(header)
+
+        for v in variants:
+            row = [v]
+            for sk in sys_keys:
+                data = per_system[sk].get(v, {})
+                for m in key_metrics:
+                    row.append(data.get(m, ""))
+            # Macro-average
+            for m in key_metrics:
+                vals = []
+                for sk in sys_keys:
+                    data = per_system[sk].get(v, {})
+                    val = data.get(m, "")
+                    if val:
+                        vals.append(float(val))
+                row.append(f"{np.mean(vals):.4f}" if vals else "")
+            writer.writerow(row)
+
+    print(f"\nCombined results saved to {combined_path}")
+
+    # Print summary console table
+    print()
+    print("=" * 100)
+    print("COMBINED ABLATION RESULTS (macro-averaged across systems)")
+    print("=" * 100)
+    col_w = 10
+    header_str = f"{'Variant':<25s}"
+    for sk in sys_keys:
+        header_str += f"{sk + ' F1':>{col_w}s}"
+    header_str += f"{'Avg F1':>{col_w}s}{'Avg MCC':>{col_w}s}{'Avg FPR':>{col_w}s}"
+    print(header_str)
+    print("-" * 100)
+    for v in variants:
+        line = f"{v:<25s}"
+        for sk in sys_keys:
+            data = per_system[sk].get(v, {})
+            val = data.get("f1_mean", "")
+            line += f"{float(val):>{col_w}.3f}" if val else f"{'N/A':>{col_w}s}"
+        # Averages
+        for m in ["f1_mean", "mcc_mean", "fp_rate_mean"]:
+            vals = [float(per_system[sk].get(v, {}).get(m, 0)) for sk in sys_keys if per_system[sk].get(v, {}).get(m)]
+            avg = f"{np.mean(vals):.3f}" if vals else "N/A"
+            line += f"{avg:>{col_w}s}"
+        print(line)
+    print("=" * 100)
+
+
 def main():
     parser = argparse.ArgumentParser(description="CAAA Ablation Study")
     parser.add_argument("--n-fault", type=int, default=50)
@@ -189,9 +293,9 @@ def main():
     parser.add_argument("--include-hard", action="store_true",
                         help="Include hard/adversarial scenarios in dataset")
     parser.add_argument("--dataset", type=str, default="RE1",
-                        choices=["RE1", "RE2"], help="RCAEval dataset")
+                        choices=["RE1", "RE2", "RE3", "all"], help="RCAEval dataset")
     parser.add_argument("--system", type=str, default="online-boutique",
-                        choices=["online-boutique", "sock-shop", "train-ticket"],
+                        choices=["online-boutique", "sock-shop", "train-ticket", "all"],
                         help="Microservice system (for rcaeval)")
     parser.add_argument("--load-ratio", type=int, default=1,
                         help="Synthetic loads per RCAEval fault")
@@ -203,8 +307,78 @@ def main():
                         help="Generate SHAP plots for Full CAAA and Baseline RF")
     parser.add_argument("--calibration", action="store_true",
                         help="Generate reliability diagrams comparing ECE before/after temperature scaling")
+    parser.add_argument("--unknown-weight", type=float, default=0.2,
+                        help="Weight for unknown-context penalty in ContextConsistencyLoss")
+    parser.add_argument("--loss-variant", type=str, default="gated",
+                        choices=["clamp", "gated", "full"],
+                        help="ContextConsistencyLoss penalty variant")
+    parser.add_argument("--film-mode", type=str, default="tadam",
+                        choices=["multiplicative", "additive", "tadam"],
+                        help="FiLM conditioning mode")
+    parser.add_argument("--context-dropout", type=float, default=0.3,
+                        help="Probability of zeroing out context features during training")
 
     args = parser.parse_args()
+
+    # Auto-clamp context loss on real data where context is noise
+    if args.data == "rcaeval" and args.loss_variant == "gated":
+        args.loss_variant = "clamp"
+        print("  [Auto] Using loss_variant='clamp' for RCAEval (context is derived, not external)")
+
+    # Handle --dataset all / --system all by recursing into per-combo runs
+    if args.data == "rcaeval" and (args.dataset == "all" or args.system == "all"):
+        datasets = ["RE1", "RE2", "RE3"] if args.dataset == "all" else [args.dataset]
+        systems = (
+            ["online-boutique", "sock-shop", "train-ticket"]
+            if args.system == "all" else [args.system]
+        )
+        csv_paths = []
+        for ds in datasets:
+            for sys_name in systems:
+                print(f"\n{'='*60}")
+                print(f"  ABLATION: {ds} / {sys_name}")
+                print(f"{'='*60}")
+                # Build a new argv for the sub-invocation
+                sub_argv = sys.argv[:]
+                # Replace --dataset and --system values
+                for flag, val in [("--dataset", ds), ("--system", sys_name)]:
+                    if flag in sub_argv:
+                        idx = sub_argv.index(flag)
+                        sub_argv[idx + 1] = val
+                    else:
+                        sub_argv.extend([flag, val])
+                sub_args = parser.parse_args(sub_argv[1:])
+                # Import ourselves to call main body — use exec trick
+                # Simpler: just set args and continue inline
+                # We'll use subprocess for isolation
+                import subprocess
+                cmd = [sys.executable, __file__]
+                for flag, val in [("--dataset", ds), ("--system", sys_name)]:
+                    found = False
+                    for j, a in enumerate(cmd):
+                        if a == flag:
+                            cmd[j + 1] = val
+                            found = True
+                    if not found:
+                        cmd.extend([flag, val])
+                # Copy all other args
+                skip_next = False
+                for j, a in enumerate(sys.argv[1:]):
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if a in ("--dataset", "--system"):
+                        skip_next = True
+                        continue
+                    if a not in cmd:
+                        cmd.append(a)
+                result = subprocess.run(cmd, check=False)
+                if result.returncode != 0:
+                    print(f"  Warning: ablation for {ds}/{sys_name} failed (exit {result.returncode})")
+                suffix = f"{ds}_{sys_name}"
+                csv_paths.append((ds, sys_name, f"outputs/results/ablation_results_{suffix}.csv"))
+        merge_results(csv_paths)
+        return
 
     metrics_to_track = ["accuracy", "f1", "f1_macro", "mcc", "fp_rate", "fault_recall", "fp_reduction"]
 
@@ -212,6 +386,8 @@ def main():
     variants = [
         "Full CAAA",
         "CAAA + Contrastive",
+        "CAAA (clamp loss)",
+        "CAAA (full penalty)",
         "No Context Features",
         "No Context Loss",
         "No Behavioral",
@@ -222,6 +398,7 @@ def main():
         "XGBoost",
         "LightGBM",
         "CatBoost",
+        "CAAA+CatBoost Hybrid",
         "Rule-Based",
         "Naive",
     ]
@@ -255,8 +432,13 @@ def main():
         all_cases = fault_cases + load_cases
         labels = np.array([0 if c.label == "FAULT" else 1 for c in all_cases])
         fault_types_all = np.array([c.fault_type for c in all_cases])
+        difficulties_all = np.array([c.difficulty or "unknown" for c in all_cases])
 
-        extractor = FeatureExtractor()
+        # Use external context for synthetic data (where the generator creates
+        # genuine operational context alongside the data) and comparison context
+        # for real data (where context must be derived from the metrics).
+        ctx_mode = "external" if args.data == "synthetic" else "comparison"
+        extractor = FeatureExtractor(context_mode=ctx_mode)
         X = extractor.extract_batch(all_cases).astype(np.float32)
 
         if use_cv:
@@ -280,6 +462,7 @@ def main():
             X_train_raw, X_test_raw = X[train_idx], X[test_idx]
             y_train_all, y_test = labels[train_idx], labels[test_idx]
             fault_types_test = fault_types_all[test_idx]
+            difficulties_test = difficulties_all[test_idx]
 
             # Split a validation set (12.5% of training data) for early
             # stopping and calibration — mirrors the split in train.py.
@@ -290,7 +473,7 @@ def main():
             )
 
             # Scale features (fit on train only) for neural models
-            scaler = StandardScaler()
+            scaler = NaNSafeScaler()
             X_train = scaler.fit_transform(X_train_raw).astype(np.float32)
             X_val = scaler.transform(X_val_raw).astype(np.float32)
             X_test = scaler.transform(X_test_raw).astype(np.float32)
@@ -311,6 +494,10 @@ def main():
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
                 X_val=X_val, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                loss_variant=args.loss_variant,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["Full CAAA"][k].append(m.get(k, 0.0))
@@ -322,9 +509,41 @@ def main():
                 args.epochs, max(args.batch_size, 16), args.lr,
                 loss_type="contrastive", seed=run_seed,
                 X_val=X_val, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                loss_variant=args.loss_variant,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["CAAA + Contrastive"][k].append(m.get(k, 0.0))
+
+            # --- CAAA (clamp loss) ---
+            print("  CAAA (clamp loss)...")
+            m = run_caaa_variant(
+                X_train, y_train, X_test, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr, seed=run_seed,
+                X_val=X_val, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                loss_variant="clamp",
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
+            )
+            for k in metrics_to_track:
+                all_results["CAAA (clamp loss)"][k].append(m.get(k, 0.0))
+
+            # --- CAAA (full penalty) ---
+            print("  CAAA (full penalty)...")
+            m = run_caaa_variant(
+                X_train, y_train, X_test, y_test, naive_fp,
+                args.epochs, args.batch_size, args.lr, seed=run_seed,
+                X_val=X_val, y_val=y_val,
+                unknown_weight=0.5,
+                loss_variant="full",
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
+            )
+            for k in metrics_to_track:
+                all_results["CAAA (full penalty)"][k].append(m.get(k, 0.0))
 
             # --- No Context Features ---
             print("  No Context Features...")
@@ -340,6 +559,9 @@ def main():
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
                 X_val=X_val_nc, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["No Context Features"][k].append(m.get(k, 0.0))
@@ -351,6 +573,9 @@ def main():
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=False, seed=run_seed,
                 X_val=X_val, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["No Context Loss"][k].append(m.get(k, 0.0))
@@ -369,6 +594,9 @@ def main():
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
                 X_val=X_val_nb, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["No Behavioral"][k].append(m.get(k, 0.0))
@@ -395,6 +623,9 @@ def main():
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=True, seed=run_seed,
                 X_val=X_val_co, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["Context Only"][k].append(m.get(k, 0.0))
@@ -417,6 +648,9 @@ def main():
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=False, seed=run_seed,
                 X_val=X_val_so, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["Statistical Only"][k].append(m.get(k, 0.0))
@@ -436,6 +670,9 @@ def main():
                 args.epochs, args.batch_size, args.lr,
                 use_context_loss=False, seed=run_seed,
                 X_val=X_val_ssl, y_val=y_val,
+                unknown_weight=args.unknown_weight,
+                film_mode=args.film_mode,
+                context_dropout=args.context_dropout,
             )
             for k in metrics_to_track:
                 all_results["Stat + Service-Level"][k].append(m.get(k, 0.0))
@@ -463,6 +700,46 @@ def main():
             m = run_catboost(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["CatBoost"][k].append(m.get(k, 0.0))
+
+            # --- CAAA+CatBoost Hybrid ---
+            print("  CAAA+CatBoost Hybrid...")
+            # Train a CAAA model first to get embeddings
+            torch.manual_seed(run_seed)
+            _hybrid_device = "cuda" if torch.cuda.is_available() else "cpu"
+            _hybrid_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2,
+                                      film_mode=args.film_mode)
+            _hybrid_trainer = CAAATrainer(
+                _hybrid_model, learning_rate=args.lr, device=_hybrid_device,
+                use_context_loss=True,
+                loss_variant=args.loss_variant,
+                unknown_weight=args.unknown_weight,
+                context_dropout_p=args.context_dropout,
+            )
+            _hybrid_trainer.train(
+                X_train, y_train,
+                X_val=X_val, y_val=y_val,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                early_stopping_patience=10,
+            )
+            # Extract embeddings using CAAAModel.get_embeddings (returns torch.Tensor)
+            _hybrid_device_obj = next(_hybrid_model.parameters()).device
+            _hybrid_model.eval()
+            with torch.no_grad():
+                _X_train_t = torch.tensor(X_train, dtype=torch.float32, device=_hybrid_device_obj)
+                _X_test_t = torch.tensor(X_test, dtype=torch.float32, device=_hybrid_device_obj)
+                emb_train = _hybrid_model.get_embeddings(_X_train_t).cpu().numpy()
+                emb_test = _hybrid_model.get_embeddings(_X_test_t).cpu().numpy()
+            # Concatenate embeddings + raw (unscaled) features
+            X_hybrid_train = np.concatenate([emb_train, X_train_unscaled], axis=1)
+            X_hybrid_test = np.concatenate([emb_test, X_test_unscaled], axis=1)
+            # Train CatBoost on hybrid features
+            _hybrid_cb = CatBoostBaseline(random_state=run_seed)
+            _hybrid_cb.fit(X_hybrid_train, y_train)
+            y_pred_hybrid = _hybrid_cb.predict(X_hybrid_test)
+            m = compute_all_metrics(y_test, y_pred_hybrid, baseline_fp_rate=naive_fp)
+            for k in metrics_to_track:
+                all_results["CAAA+CatBoost Hybrid"][k].append(m.get(k, 0.0))
 
             # --- Rule-Based (uses unscaled features) ---
             print("  Rule-Based...")
@@ -518,10 +795,14 @@ def main():
     # Re-run Full CAAA on last fold to get predictions for breakdown
     torch.manual_seed(args.base_seed)
     _ft_device = "cuda" if torch.cuda.is_available() else "cpu"
-    _ft_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+    _ft_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2,
+                          film_mode=args.film_mode)
     _ft_trainer = CAAATrainer(
         _ft_model, learning_rate=args.lr, device=_ft_device,
         use_context_loss=True,
+        unknown_weight=args.unknown_weight,
+        loss_variant=args.loss_variant,
+        context_dropout_p=args.context_dropout,
     )
     _ft_trainer.train(
         X_train, y_train,
@@ -548,10 +829,40 @@ def main():
         print(f"{ft:<30s}{count:>8d}{acc:>12.3f}{recall:>12.3f}{misclass:>15.3f}")
     print("=" * 80)
 
-    # Save CSV
+    # Per-difficulty breakdown (Full CAAA, last fold)
+    unique_diffs = sorted(set(d for d in difficulties_test if d != "unknown"))
+    if unique_diffs:
+        print()
+        print("=" * 80)
+        print("PER-DIFFICULTY BREAKDOWN (Full CAAA, last fold)")
+        print("=" * 80)
+        print(f"{'Difficulty':<15s}{'Count':>8s}{'Accuracy':>12s}{'FP Rate':>12s}{'Recall':>12s}")
+        print("-" * 80)
+        for diff in unique_diffs:
+            diff_mask = difficulties_test == diff
+            if diff_mask.sum() == 0:
+                continue
+            y_true_d = y_test[diff_mask]
+            y_pred_d = _ft_pred[diff_mask]
+            count = int(diff_mask.sum())
+            acc = float((y_true_d == y_pred_d).mean())
+            # FP rate: load cases misclassified as fault
+            load_mask = y_true_d == 1
+            fpr = float((y_pred_d[load_mask] == 0).mean()) if load_mask.sum() > 0 else 0.0
+            # Fault recall
+            fault_mask = y_true_d == 0
+            recall = float((y_pred_d[fault_mask] == 0).mean()) if fault_mask.sum() > 0 else 0.0
+            print(f"{diff:<15s}{count:>8d}{acc:>12.3f}{fpr:>12.3f}{recall:>12.3f}")
+        print("=" * 80)
+
+    # Save CSV — suffix encodes data source for unique filenames
     csv_dir = "outputs/results"
     os.makedirs(csv_dir, exist_ok=True)
-    csv_path = os.path.join(csv_dir, "ablation_results.csv")
+    if args.data == "rcaeval":
+        suffix = f"{args.dataset}_{args.system}"
+    else:
+        suffix = "synthetic"
+    csv_path = os.path.join(csv_dir, f"ablation_results_{suffix}.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         header_row = ["variant"]
@@ -573,7 +884,7 @@ def main():
             plot_shap_summary, plot_shap_by_class, plot_shap_by_fault_type,
         )
 
-        shap_dir = os.path.join(csv_dir, "shap")
+        shap_dir = os.path.join(csv_dir, f"shap_{suffix}")
         os.makedirs(shap_dir, exist_ok=True)
         print("\nGenerating SHAP plots on last fold data...")
 
@@ -599,10 +910,14 @@ def main():
         print("  Full CAAA SHAP (KernelExplainer, may take a moment)...")
         torch.manual_seed(args.base_seed)
         _shap_device = "cuda" if torch.cuda.is_available() else "cpu"
-        caaa_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        caaa_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2,
+                               film_mode=args.film_mode)
         caaa_trainer = CAAATrainer(
             caaa_model, learning_rate=args.lr, device=_shap_device,
             use_context_loss=True,
+            unknown_weight=args.unknown_weight,
+            loss_variant=args.loss_variant,
+            context_dropout_p=args.context_dropout,
         )
         caaa_trainer.train(
             X_train, y_train,
@@ -627,17 +942,21 @@ def main():
         from src.evaluation.metrics import compute_expected_calibration_error
         from src.evaluation.visualization import plot_reliability_diagram
 
-        cal_dir = os.path.join(csv_dir, "calibration")
+        cal_dir = os.path.join(csv_dir, f"calibration_{suffix}")
         os.makedirs(cal_dir, exist_ok=True)
         print("\nCalibration evaluation on last fold data...")
 
         # Train a fresh Full CAAA model for calibration analysis
         torch.manual_seed(args.base_seed)
         _cal_device = "cuda" if torch.cuda.is_available() else "cpu"
-        cal_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2)
+        cal_model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2,
+                              film_mode=args.film_mode)
         cal_trainer = CAAATrainer(
             cal_model, learning_rate=args.lr, device=_cal_device,
             use_context_loss=True,
+            unknown_weight=args.unknown_weight,
+            loss_variant=args.loss_variant,
+            context_dropout_p=args.context_dropout,
         )
         cal_trainer.train(
             X_train, y_train,

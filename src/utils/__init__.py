@@ -76,3 +76,29 @@ def int_to_labels(ints, label_map=None) -> List[str]:
     if label_map is None:
         label_map = INT_TO_LABEL
     return [label_map[int_label] for int_label in ints]
+
+
+class NaNSafeScaler:
+    """StandardScaler wrapper that replaces NaN/inf from zero-variance columns.
+
+    When a feature column has zero variance (e.g. all-zero metrics from services
+    with no traffic), StandardScaler divides by zero producing NaN.  This wrapper
+    detects those columns and replaces the resulting NaN/inf values with 0.0.
+    """
+
+    def __init__(self):
+        from sklearn.preprocessing import StandardScaler
+        self._scaler = StandardScaler()
+
+    def fit(self, X):
+        self._scaler.fit(X)
+        return self
+
+    def transform(self, X):
+        result = self._scaler.transform(X)
+        np.nan_to_num(result, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        return result
+
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)

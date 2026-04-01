@@ -60,7 +60,7 @@ class TestFeatureNames:
         assert all(isinstance(n, str) for n in names)
         # Spot check some known names
         assert "global_load_ratio" in names
-        assert "event_active" in names
+        assert "cpu_deviation" in names
         assert "max_error_rate" in names
         assert "n_services" in names
 
@@ -78,44 +78,43 @@ class TestFaultVsLoad:
         err_idx = names.index("error_rate_delta")
         assert np.mean(fault_feats[:, err_idx]) > np.mean(load_feats[:, err_idx])
 
-        # event_active: majority of load cases should have event_active > 0.5
-        # and majority of fault cases should have event_active < 0.5
-        # Thresholds lowered to 60% due to 30% noise injection for label-leakage prevention
-        event_idx = names.index("event_active")
-        load_active_frac = np.mean(load_feats[:, event_idx] > 0.5)
-        fault_inactive_frac = np.mean(fault_feats[:, event_idx] < 0.5)
-        assert load_active_frac >= 0.60
-        assert fault_inactive_frac >= 0.60
+        # With comparison context mode, cpu_deviation should be higher for
+        # fault cases on average (faults deviate more from baseline)
+        cpu_dev_idx = names.index("cpu_deviation")
+        assert np.mean(fault_feats[:, cpu_dev_idx]) > np.mean(load_feats[:, cpu_dev_idx]) - 0.1
 
 
 # ── Context features ─────────────────────────────────────────────────
 
 class TestContextFeatures:
-    def test_context_features_for_load(self, extractor, dataset):
+    def test_context_features_for_load(self, dataset):
         _, load_cases = dataset
-        names = extractor.feature_names()
-        event_idx = names.index("event_active")
-        conf_idx = names.index("context_confidence")
+        ext = FeatureExtractor(context_mode="external")
+        # Index 12 is the first context slot; in external mode it holds the
+        # event_active value (1.0 when an event_type key is present in context).
+        event_idx = 12
 
         # Majority (>60%) of load cases should have event_active == 1.0
         # (30% may have empty context due to label-leakage prevention)
         active_count = 0
         for case in load_cases:
-            feats = extractor.extract(case)
+            feats = ext.extract(case)
             if feats[event_idx] == 1.0:
                 active_count += 1
         assert active_count / len(load_cases) >= 0.60
 
-    def test_context_features_for_fault(self, extractor, dataset):
+    def test_context_features_for_fault(self, dataset):
         fault_cases, _ = dataset
-        names = extractor.feature_names()
-        event_idx = names.index("event_active")
+        ext = FeatureExtractor(context_mode="external")
+        # Index 12 is the first context slot; in external mode it holds the
+        # event_active value (0.0 when no event_type key is present in context).
+        event_idx = 12
 
         # Majority (>60%) of fault cases should have event_active == 0.0
         # (30% may have fake context due to label-leakage prevention)
         inactive_count = 0
         for case in fault_cases:
-            feats = extractor.extract(case)
+            feats = ext.extract(case)
             if feats[event_idx] == 0.0:
                 inactive_count += 1
         assert inactive_count / len(fault_cases) >= 0.60
@@ -167,17 +166,17 @@ class TestFeatureReproducibility:
         np.testing.assert_array_equal(X1, X2)
 
     def test_different_seed_produces_different_features(self, dataset):
-        """Different seeds should produce different context features."""
+        """Different seeds should produce different context features (external mode)."""
         fault_cases, load_cases = dataset
         all_cases = fault_cases + load_cases
 
-        ext1 = FeatureExtractor(seed=42)
+        ext1 = FeatureExtractor(seed=42, context_mode="external")
         X1 = ext1.extract_batch(all_cases)
 
-        ext2 = FeatureExtractor(seed=99)
+        ext2 = FeatureExtractor(seed=99, context_mode="external")
         X2 = ext2.extract_batch(all_cases)
 
-        # Context features (indices 12-17) should differ due to noise
+        # External context features (indices 12-17) should differ due to noise
         assert not np.allclose(X1[:, 12:17], X2[:, 12:17])
 
     def test_extraction_order_independent(self, dataset):

@@ -42,11 +42,11 @@ BEHAVIORAL_NAMES: List[str] = [
 ]
 
 CONTEXT_NAMES: List[str] = [
-    "event_active",
-    "event_expected_impact",
-    "time_seasonality",
-    "recent_deployment",
-    "context_confidence",
+    "cpu_deviation",
+    "error_rate_ratio",
+    "correlation_shift",
+    "latency_deviation",
+    "baseline_confidence",
 ]
 
 # network_out is intentionally excluded from statistical features.  Adding it
