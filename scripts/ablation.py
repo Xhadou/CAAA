@@ -333,45 +333,33 @@ def main():
             if args.system == "all" else [args.system]
         )
         csv_paths = []
+        import subprocess
         for ds in datasets:
             for sys_name in systems:
                 print(f"\n{'='*60}")
                 print(f"  ABLATION: {ds} / {sys_name}")
                 print(f"{'='*60}")
-                # Build a new argv for the sub-invocation
-                sub_argv = sys.argv[:]
-                # Replace --dataset and --system values
-                for flag, val in [("--dataset", ds), ("--system", sys_name)]:
-                    if flag in sub_argv:
-                        idx = sub_argv.index(flag)
-                        sub_argv[idx + 1] = val
-                    else:
-                        sub_argv.extend([flag, val])
-                sub_args = parser.parse_args(sub_argv[1:])
-                # Import ourselves to call main body — use exec trick
-                # Simpler: just set args and continue inline
-                # We'll use subprocess for isolation
-                import subprocess
+                # Build command by replacing --dataset/--system values
+                # and forwarding all other args (including --shap, --calibration, etc.)
                 cmd = [sys.executable, __file__]
-                for flag, val in [("--dataset", ds), ("--system", sys_name)]:
-                    found = False
-                    for j, a in enumerate(cmd):
-                        if a == flag:
-                            cmd[j + 1] = val
-                            found = True
-                    if not found:
-                        cmd.extend([flag, val])
-                # Copy all other args
                 skip_next = False
                 for j, a in enumerate(sys.argv[1:]):
                     if skip_next:
                         skip_next = False
                         continue
-                    if a in ("--dataset", "--system"):
+                    if a == "--dataset":
+                        cmd.extend(["--dataset", ds])
                         skip_next = True
-                        continue
-                    if a not in cmd:
+                    elif a == "--system":
+                        cmd.extend(["--system", sys_name])
+                        skip_next = True
+                    else:
                         cmd.append(a)
+                # Ensure --dataset and --system are present even if not in original argv
+                if "--dataset" not in cmd:
+                    cmd.extend(["--dataset", ds])
+                if "--system" not in cmd:
+                    cmd.extend(["--system", sys_name])
                 result = subprocess.run(cmd, check=False)
                 if result.returncode != 0:
                     print(f"  Warning: ablation for {ds}/{sys_name} failed (exit {result.returncode})")
