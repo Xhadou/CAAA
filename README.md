@@ -399,7 +399,6 @@ CAAA/
 │   └── test_rcaeval_pipeline.py   # RCAEval integration tests
 ├── GETTING_STARTED.md               # Step-by-step starter guide
 ├── CAAA Literature Review.md        # 150+ paper literature review
-├── CAAA-Full-Research-and-Implementation-Plan.md
 ├── requirements.txt
 ├── pyproject.toml
 ├── run_experiment.sh
