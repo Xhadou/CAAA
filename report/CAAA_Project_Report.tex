@@ -913,10 +913,7 @@ The more decisive finding---delivered in Chapter~7---is that context is a univer
 
 For reference, Table~\ref{tab:scaling-full-hard} reports all ten variants at the headline scale $n = 40{,}000$ on hard difficulty, which is the dataset used in Chapter~7's universal-context analysis.
 
-\begin{table}[!htbp]
-    \centering
-    \caption{All Variants at 40{,}000 Hard Samples (10 seeds, mean $\pm$ std)}
-    \label{tab:scaling-full-hard}
+\begin{center}
     \small
     \begin{tabular}{lc}
         \toprule
@@ -934,7 +931,9 @@ For reference, Table~\ref{tab:scaling-full-hard} reports all ten variants at the
         RandomForest (no context) & $0.9193 \pm 0.0023$ \\
         \bottomrule
     \end{tabular}
-\end{table}
+    \captionof{table}{All Variants at 40{,}000 Hard Samples (10 seeds, mean $\pm$ std)}
+    \label{tab:scaling-full-hard}
+\end{center}
 
 Two observations from this table foreshadow Chapter~7. First, Full \sys{} is the single best variant. Second, \emph{every} model family's ``with-context'' variant beats its ``no-context'' variant, and by a margin larger than the \sys{}-vs-tree gap.
 
