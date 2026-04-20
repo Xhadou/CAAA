@@ -304,9 +304,47 @@ Beyond the accuracy numbers, this research makes several methodological contribu
 
 6. **FiLM noise robustness**: TADAM-style delta regularization + feature-group dropout to prevent multiplicative noise amplification in the conditioning pathway.
 
+7. **Fair baseline comparison**: Tree baselines (CatBoost, XGBoost, etc.) are evaluated on metric-only features (39 features, context excluded), matching the real-world scenario where traditional anomaly detectors don't have access to operational context. This follows the experimental design standard used by CIRCA (KDD 2022), RCD (NeurIPS 2022), and multi-modal RCA (KDD 2024).
+
 ---
 
-## 13. Key References
+## 13. Round 13: Fair Experimental Design
+
+### Problem Identified
+
+In Rounds 1-12, tree baselines received the same 44 features as CAAA, including the 5 context features (indices 12-17). This meant the experiment tested "FiLM conditioning vs tree splits on identical inputs" rather than the intended comparison: "context-aware attribution vs traditional attribution."
+
+This is an experimental design flaw. In real-world deployments, traditional anomaly detectors (CatBoost, XGBoost, etc.) operate on service metrics alone — they don't have access to operational context (event calendars, deployment logs, incident metadata). CAAA's contribution is integrating this additional information via FiLM conditioning.
+
+### Fix: Context-Free Baselines
+
+Following the experimental design standard from top venues (CIRCA/KDD 2022, RCD/NeurIPS 2022, multi-modal RCA/KDD 2024), tree baselines now receive **39 features** (context columns deleted, not zeroed) while CAAA retains all **44 features** including context.
+
+Additionally, "CatBoost (with context)" is included as an upper-bound reference showing that trees also benefit from context features when available — but the fair comparison is against context-unaware baselines.
+
+### Results
+
+*(To be filled after running experiments)*
+
+| Variant | Accuracy | F1 | Context? |
+|---------|----------|-----|----------|
+| Full CAAA | — | — | Yes (44 features) |
+| CatBoost | — | — | No (39 features) |
+| CatBoost (with context) | — | — | Yes (44 features) |
+| No Context Features | — | — | No (CAAA ablation) |
+
+### Academic Justification
+
+The gold-standard ablation table (three-row comparison):
+1. **Best traditional baseline** (CatBoost on 39 metric-only features) — the current standard in AIOps
+2. **CAAA without context** (architecture-only contribution) — isolates model architecture from context
+3. **Full CAAA with context** (our method) — demonstrates context integration value
+
+The delta between rows 1 and 3 shows the value of context-aware attribution. The delta between rows 2 and 3 isolates context's contribution within our architecture.
+
+---
+
+## 14. Key References
 
 - Geirhos, R., et al. (2020). Shortcut learning in deep neural networks. *Nature Machine Intelligence*, 2, 665-673.
 - Grinsztajn, L., et al. (2022). Why do tree-based models still outperform deep learning on tabular data? *NeurIPS*.

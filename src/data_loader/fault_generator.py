@@ -1,7 +1,7 @@
 """Fault scenario metrics generator for microservice anomaly cases."""
 
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -70,6 +70,7 @@ class FaultGenerator:
         n_services: int = 12,
         sequence_length: int = 60,
         seed: int = 42,
+        severity_factors: Optional[Dict[str, float]] = None,
     ) -> None:
         """Initialize the fault generator.
 
@@ -77,10 +78,15 @@ class FaultGenerator:
             n_services: Number of microservices.
             sequence_length: Number of timesteps in each sequence.
             seed: Random seed for reproducibility.
+            severity_factors: Optional override for severity scaling factors.
+                Defaults to class-level ``SEVERITY_FACTORS``. Pass a dict like
+                ``{"low": 0.02, "medium": 0.15, "high": 0.7}`` to create a
+                harder task with subtler fault signals.
         """
         self.n_services = n_services
         self.sequence_length = sequence_length
         self.rng = np.random.default_rng(seed)
+        self.severity_factors = severity_factors or self.SEVERITY_FACTORS
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -147,7 +153,7 @@ class FaultGenerator:
         Returns:
             Modified DataFrame with the fault injected.
         """
-        sev = self.SEVERITY_FACTORS[severity]
+        sev = self.severity_factors[severity]
         df = df.copy()
         n = len(df)
         fault_len = n - fault_start

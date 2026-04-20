@@ -114,6 +114,10 @@ class CAAATrainer:
         epochs: int = 50,
         batch_size: int = 32,
         early_stopping_patience: int = 10,
+        raw_train: Optional[np.ndarray] = None,
+        mask_train: Optional[np.ndarray] = None,
+        raw_val: Optional[np.ndarray] = None,
+        mask_val: Optional[np.ndarray] = None,
     ) -> Dict[str, List[float]]:
         """Trains the CAAA model.
 
@@ -126,17 +130,34 @@ class CAAATrainer:
             batch_size: Mini-batch size.
             early_stopping_patience: Number of epochs without val_loss
                 improvement before stopping.
+            raw_train: Optional raw time-series tensors of shape
+                ``(n_samples, max_services, seq_len, n_metrics)``.
+                Only used when the model has ``use_temporal=True``.
+            mask_train: Optional service masks of shape
+                ``(n_samples, max_services)``.
+            raw_val: Optional validation raw tensors.
+            mask_val: Optional validation service masks.
 
         Returns:
             Dictionary with 'train_loss' and optionally 'val_loss' lists.
         """
         X_train_t = torch.tensor(X_train, dtype=torch.float32, device=self.device)
         y_train_t = torch.tensor(y_train, dtype=torch.long, device=self.device)
+        raw_train_t = None
+        mask_train_t = None
+        if raw_train is not None:
+            raw_train_t = torch.tensor(raw_train, dtype=torch.float32, device=self.device)
+            mask_train_t = torch.tensor(mask_train, dtype=torch.float32, device=self.device)
 
         has_val = X_val is not None and y_val is not None
         if has_val:
             X_val_t = torch.tensor(X_val, dtype=torch.float32, device=self.device)
             y_val_t = torch.tensor(y_val, dtype=torch.long, device=self.device)
+        raw_val_t = None
+        mask_val_t = None
+        if raw_val is not None:
+            raw_val_t = torch.tensor(raw_val, dtype=torch.float32, device=self.device)
+            mask_val_t = torch.tensor(mask_val, dtype=torch.float32, device=self.device)
 
         history: Dict[str, List[float]] = {"train_loss": []}
         if self.use_context_loss:
@@ -171,6 +192,8 @@ class CAAATrainer:
                 batch_idx = indices[start : start + batch_size]
                 X_batch = X_train_t[batch_idx]
                 y_batch = y_train_t[batch_idx]
+                raw_batch = raw_train_t[batch_idx] if raw_train_t is not None else None
+                mask_batch = mask_train_t[batch_idx] if mask_train_t is not None else None
 
                 # Feature-group dropout: zero out context features with prob p
                 if self.context_dropout_p > 0 and self.model.training:
@@ -181,17 +204,17 @@ class CAAATrainer:
                 self.optimizer.zero_grad()
                 if self.loss_type == "contrastive":
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
-                    embeddings = self.model.get_embeddings(X_batch)
+                    embeddings = self.model.get_embeddings(X_batch, raw_batch, mask_batch)
                     logits = self.model.classifier(embeddings)
                     loss, components = self.criterion(
                         embeddings, logits, y_batch, context,
                     )
                 elif self.use_context_loss:
-                    logits = self.model(X_batch)
+                    logits = self.model(X_batch, raw_batch, mask_batch)
                     context = X_batch[:, _CONTEXT_START:_CONTEXT_END]
                     loss, components = self.criterion(logits, y_batch, context)
                 else:
-                    logits = self.model(X_batch)
+                    logits = self.model(X_batch, raw_batch, mask_batch)
                     loss = self.criterion(logits, y_batch)
                 # TADAM regularization: L2 penalty on FiLM delta
                 if self.tadam_lambda > 0 and hasattr(self.model, 'context_module'):
@@ -233,7 +256,7 @@ class CAAATrainer:
                 history["cls_loss"].append(epoch_cls_loss / max(n_batches, 1))
 
             if has_val:
-                val_loss = self._compute_loss(X_val_t, y_val_t)
+                val_loss = self._compute_loss(X_val_t, y_val_t, raw_val_t, mask_val_t)
                 history["val_loss"].append(val_loss)
                 # Step the LR scheduler based on validation loss
                 self.scheduler.step(val_loss)
@@ -272,55 +295,71 @@ class CAAATrainer:
 
         return history
 
-    def evaluate(self, X: np.ndarray, y: np.ndarray) -> Dict[str, float]:
+    def evaluate(
+        self, X: np.ndarray, y: np.ndarray,
+        raw: Optional[np.ndarray] = None,
+        mask: Optional[np.ndarray] = None,
+    ) -> Dict[str, float]:
         """Evaluates the model on the given data.
 
         Args:
             X: Feature array of shape (n_samples, input_dim).
             y: Label array of shape (n_samples,).
+            raw: Optional raw time-series tensors.
+            mask: Optional service masks.
 
         Returns:
             Dictionary with 'loss' and 'accuracy'.
         """
         X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
         y_t = torch.tensor(y, dtype=torch.long, device=self.device)
+        raw_t = torch.tensor(raw, dtype=torch.float32, device=self.device) if raw is not None else None
+        mask_t = torch.tensor(mask, dtype=torch.float32, device=self.device) if mask is not None else None
 
         self.model.eval()
         with torch.no_grad():
             if self.loss_type == "contrastive":
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
-                embeddings = self.model.get_embeddings(X_t)
+                embeddings = self.model.get_embeddings(X_t, raw_t, mask_t)
                 logits = self.model.classifier(embeddings)
                 loss_tensor, _ = self.criterion(
                     embeddings, logits, y_t, context,
                 )
                 loss = loss_tensor.item()
             elif self.use_context_loss:
-                logits = self.model(X_t)
+                logits = self.model(X_t, raw_t, mask_t)
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 loss_tensor, _ = self.criterion(logits, y_t, context)
                 loss = loss_tensor.item()
             else:
-                logits = self.model(X_t)
+                logits = self.model(X_t, raw_t, mask_t)
                 loss = self.criterion(logits, y_t).item()
             preds = torch.argmax(logits, dim=-1)
             accuracy = (preds == y_t).float().mean().item()
 
         return {"loss": loss, "accuracy": accuracy}
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(
+        self, X: np.ndarray,
+        raw: Optional[np.ndarray] = None,
+        mask: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         """Returns predicted class labels.
 
         Args:
             X: Feature array of shape (n_samples, input_dim).
+            raw: Optional raw time-series tensors.
+            mask: Optional service masks.
 
         Returns:
             Predicted class labels of shape (n_samples,).
         """
         X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
+        raw_t = torch.tensor(raw, dtype=torch.float32, device=self.device) if raw is not None else None
+        mask_t = torch.tensor(mask, dtype=torch.float32, device=self.device) if mask is not None else None
         self.model.eval()
         with torch.no_grad():
-            preds = self.model.predict(X_t)
+            preds = self.model.predict(X_t, raw_t, mask_t)
         return preds.cpu().numpy()
 
     def calibrate_temperature(
@@ -564,12 +603,20 @@ class CAAATrainer:
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         logger.info("Model loaded from %s", path)
 
-    def _compute_loss(self, X_t: torch.Tensor, y_t: torch.Tensor) -> float:
+    def _compute_loss(
+        self,
+        X_t: torch.Tensor,
+        y_t: torch.Tensor,
+        raw_t: Optional[torch.Tensor] = None,
+        mask_t: Optional[torch.Tensor] = None,
+    ) -> float:
         """Computes loss on given tensors.
 
         Args:
             X_t: Feature tensor.
             y_t: Label tensor.
+            raw_t: Optional raw time-series tensor.
+            mask_t: Optional service mask tensor.
 
         Returns:
             Loss value as a float.
@@ -578,14 +625,14 @@ class CAAATrainer:
         with torch.no_grad():
             if self.loss_type == "contrastive":
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
-                embeddings = self.model.get_embeddings(X_t)
+                embeddings = self.model.get_embeddings(X_t, raw_t, mask_t)
                 logits = self.model.classifier(embeddings)
                 loss, _ = self.criterion(embeddings, logits, y_t, context)
             elif self.use_context_loss:
-                logits = self.model(X_t)
+                logits = self.model(X_t, raw_t, mask_t)
                 context = X_t[:, _CONTEXT_START:_CONTEXT_END]
                 loss, _ = self.criterion(logits, y_t, context)
             else:
-                logits = self.model(X_t)
+                logits = self.model(X_t, raw_t, mask_t)
                 loss = self.criterion(logits, y_t)
         return loss.item()

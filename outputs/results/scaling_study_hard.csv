@@ -1,0 +1,51 @@
+total_samples,variant,accuracy_mean,accuracy_std,f1_mean,f1_std
+500,CatBoost (no context),0.9050,0.0150,0.9049,0.0149
+500,CatBoost (with context),0.9150,0.0250,0.9150,0.0250
+500,Full CAAA,0.9050,0.0150,0.9050,0.0150
+500,LightGBM (no context),0.9050,0.0250,0.9049,0.0251
+500,LightGBM (with context),0.9350,0.0050,0.9350,0.0050
+500,No Context,0.8500,0.0400,0.8495,0.0396
+500,RandomForest (no context),0.8750,0.0250,0.8749,0.0249
+500,RandomForest (with context),0.9050,0.0050,0.9050,0.0050
+500,XGBoost (no context),0.8950,0.0050,0.8949,0.0049
+500,XGBoost (with context),0.9300,0.0300,0.9300,0.0300
+1000,CatBoost (no context),0.9050,0.0200,0.9049,0.0200
+1000,CatBoost (with context),0.9335,0.0183,0.9335,0.0183
+1000,Full CAAA,0.9100,0.0261,0.9099,0.0261
+1000,LightGBM (no context),0.9130,0.0291,0.9130,0.0291
+1000,LightGBM (with context),0.9310,0.0237,0.9310,0.0238
+1000,No Context,0.8905,0.0197,0.8904,0.0197
+1000,RandomForest (no context),0.9055,0.0210,0.9054,0.0210
+1000,RandomForest (with context),0.9310,0.0242,0.9310,0.0242
+1000,XGBoost (no context),0.9065,0.0278,0.9064,0.0278
+1000,XGBoost (with context),0.9285,0.0256,0.9285,0.0256
+5000,CatBoost (no context),0.9241,0.0045,0.9241,0.0045
+5000,CatBoost (with context),0.9427,0.0072,0.9427,0.0072
+5000,Full CAAA,0.9416,0.0079,0.9416,0.0079
+5000,LightGBM (no context),0.9242,0.0080,0.9242,0.0080
+5000,LightGBM (with context),0.9413,0.0063,0.9413,0.0063
+5000,No Context,0.9270,0.0076,0.9269,0.0076
+5000,RandomForest (no context),0.9136,0.0068,0.9136,0.0068
+5000,RandomForest (with context),0.9420,0.0084,0.9420,0.0085
+5000,XGBoost (no context),0.9249,0.0047,0.9249,0.0047
+5000,XGBoost (with context),0.9414,0.0058,0.9414,0.0058
+20000,CatBoost (no context),0.9290,0.0036,0.9290,0.0036
+20000,CatBoost (with context),0.9465,0.0031,0.9465,0.0031
+20000,Full CAAA,0.9468,0.0034,0.9468,0.0034
+20000,LightGBM (no context),0.9297,0.0025,0.9297,0.0025
+20000,LightGBM (with context),0.9464,0.0026,0.9464,0.0026
+20000,No Context,0.9339,0.0030,0.9339,0.0030
+20000,RandomForest (no context),0.9166,0.0040,0.9166,0.0040
+20000,RandomForest (with context),0.9397,0.0040,0.9397,0.0040
+20000,XGBoost (no context),0.9302,0.0034,0.9302,0.0034
+20000,XGBoost (with context),0.9468,0.0022,0.9468,0.0022
+40000,CatBoost (no context),0.9320,0.0028,0.9320,0.0028
+40000,CatBoost (with context),0.9491,0.0021,0.9490,0.0021
+40000,Full CAAA,0.9511,0.0018,0.9511,0.0018
+40000,LightGBM (no context),0.9342,0.0024,0.9342,0.0024
+40000,LightGBM (with context),0.9500,0.0018,0.9500,0.0018
+40000,No Context,0.9383,0.0028,0.9383,0.0028
+40000,RandomForest (no context),0.9193,0.0023,0.9193,0.0023
+40000,RandomForest (with context),0.9423,0.0019,0.9423,0.0019
+40000,XGBoost (no context),0.9339,0.0024,0.9339,0.0024
+40000,XGBoost (with context),0.9499,0.0020,0.9499,0.0020

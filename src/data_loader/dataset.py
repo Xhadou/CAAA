@@ -26,6 +26,7 @@ def generate_combined_dataset(
     systems: Optional[List[str]] = None,
     seed: int = 42,
     include_hard: bool = True,
+    difficulty: str = "default",
 ) -> Tuple[List[AnomalyCase], List[AnomalyCase]]:
     """Generate a combined dataset of FAULT and EXPECTED_LOAD cases.
 
@@ -37,6 +38,12 @@ def generate_combined_dataset(
         seed: Random seed for reproducibility.
         include_hard: When True, replace ~35% of cases with
             hard/adversarial scenarios from :func:`generate_hard_dataset`.
+        difficulty: Task difficulty level. One of:
+            - ``"default"``: Standard 35/35/30 low/medium/high severity mix with
+              normal severity factors (0.05/0.3/1.0). Achieves ~97% F1 ceiling.
+            - ``"hard"``: 60/25/15 severity mix with reduced severity factors
+              (0.02/0.15/0.7) and higher context noise. Lowers ceiling to
+              ~85% so model architecture differences become visible.
 
     Returns:
         Tuple of (fault_cases, load_cases).
@@ -44,8 +51,23 @@ def generate_combined_dataset(
     if systems is None:
         systems = ["online-boutique"]
 
+    # Difficulty profile controls the severity distribution, severity factors
+    # scaling, and context-noise rate. "hard" mode intentionally lowers the
+    # Bayes-optimal ceiling so that architectural differences (neural vs
+    # tree, context vs no context) become visible.
+    if difficulty == "hard":
+        _SEVERITY_DIST = [("low", 0.60), ("medium", 0.25), ("high", 0.15)]
+        _severity_factors = {"low": 0.02, "medium": 0.15, "high": 0.7}
+        _fake_context_rate = 0.50  # up from 0.30
+        _empty_context_rate = 0.50  # up from 0.30
+    else:
+        _SEVERITY_DIST = [("low", 0.35), ("medium", 0.35), ("high", 0.30)]
+        _severity_factors = None  # use class default
+        _fake_context_rate = 0.30
+        _empty_context_rate = 0.30
+
     rng = np.random.default_rng(seed)
-    fault_gen = FaultGenerator(seed=seed)
+    fault_gen = FaultGenerator(seed=seed, severity_factors=_severity_factors)
     load_gen = SyntheticMetricsGenerator(seed=seed + 1)
 
     fault_cases: List[AnomalyCase] = []
@@ -54,7 +76,6 @@ def generate_combined_dataset(
     # Generate fault cases with mixed severity levels.
     # Low-severity faults produce subtle error increases that overlap with
     # load-induced errors, forcing the model to rely on context features.
-    _SEVERITY_DIST = [("low", 0.35), ("medium", 0.35), ("high", 0.30)]
 
     logger.info("Generating %d fault cases", n_fault)
     for i in range(n_fault):
@@ -86,9 +107,10 @@ def generate_combined_dataset(
             fault_context = {}
             if rng.random() < 0.3:
                 fault_context["recent_deployment"] = True
-            # 30% of fault cases get a fake context with event_type to prevent
-            # event_active from being a perfect proxy for the label.
-            if rng.random() < 0.30:
+            # Some fault cases get a fake context with event_type to prevent
+            # event_active from being a perfect proxy for the label. Rate is
+            # controlled by difficulty ("hard" mode raises it to 50%).
+            if rng.random() < _fake_context_rate:
                 fake_event = str(rng.choice([
                     "flash_sale", "marketing_campaign", "scheduled_batch",
                 ]))
@@ -140,9 +162,10 @@ def generate_combined_dataset(
         else:
             load_difficulty = "easy"
 
-        # 30% of load cases get empty context (simulating unscheduled load
-        # spikes with no calendar entry) to prevent label leakage.
-        if rng.random() < 0.30:
+        # Some load cases get empty context (simulating unscheduled load
+        # spikes with no calendar entry) to prevent label leakage. Rate is
+        # controlled by difficulty ("hard" mode raises it to 50%).
+        if rng.random() < _empty_context_rate:
             context = {}
         # Counterfactual baseline: same seed, no load injection
         reference_services = load_gen.generate_counterfactual_load(

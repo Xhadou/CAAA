@@ -88,6 +88,7 @@ class FeatureEncoder(nn.Module):
         dropout: float = 0.2,
         use_ple: bool = True,
         n_bins: int = 8,
+        ple_dim: int = 0,
     ) -> None:
         """Initializes the FeatureEncoder.
 
@@ -98,15 +99,26 @@ class FeatureEncoder(nn.Module):
             dropout: Dropout probability.
             use_ple: Whether to apply PiecewiseLinearEmbedding before MLP layers.
             n_bins: Number of quantile bins for PLE (used only when use_ple=True).
+            ple_dim: How many leading dimensions receive PLE treatment. If 0
+                (default), PLE is applied to all ``input_dim`` dimensions.
+                When > 0, the first ``ple_dim`` dimensions get PLE-encoded
+                while the remaining ``input_dim - ple_dim`` dimensions pass
+                through unmodified and are concatenated. This is used when
+                the input is a fusion of engineered features (first 44 dims)
+                and learned temporal embeddings (last 16 dims) — PLE bins are
+                meaningful for raw metric features but not for neural embeddings.
         """
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.use_ple = use_ple
+        self.ple_dim = ple_dim if ple_dim > 0 else input_dim
 
         if use_ple:
-            self.ple = PiecewiseLinearEmbedding(input_dim, n_bins)
-            first_layer_dim = input_dim * n_bins
+            self.ple = PiecewiseLinearEmbedding(self.ple_dim, n_bins)
+            # PLE expands ple_dim to ple_dim*n_bins; remaining dims pass through
+            passthrough_dim = input_dim - self.ple_dim
+            first_layer_dim = self.ple_dim * n_bins + passthrough_dim
         else:
             first_layer_dim = input_dim
 
@@ -142,14 +154,21 @@ class FeatureEncoder(nn.Module):
             Encoded tensor of shape (batch_size, hidden_dim).
         """
         if self.use_ple:
-            x = self.ple(x)
+            if self.ple_dim < self.input_dim:
+                # Split: PLE on first ple_dim dims, passthrough on rest
+                x_ple = self.ple(x[:, :self.ple_dim])
+                x_pass = x[:, self.ple_dim:]
+                x = torch.cat([x_ple, x_pass], dim=-1)
+            else:
+                x = self.ple(x)
         return self.layers(x)
 
     def set_bins(self, X_train) -> None:
         """Set PLE bin edges from training data.
 
         Args:
-            X_train: numpy array of shape (n_samples, n_features).
+            X_train: numpy array of shape (n_samples, n_features). Only the
+                first ``ple_dim`` columns are used for bin computation.
         """
         if self.use_ple:
-            self.ple.set_bins(X_train)
+            self.ple.set_bins(X_train[:, :self.ple_dim])

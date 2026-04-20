@@ -37,6 +37,8 @@ def run_caaa_variant(
     use_context_loss=True, loss_type="context_consistency", seed=42,
     X_val=None, y_val=None, unknown_weight=0.2, loss_variant="gated",
     film_mode="tadam", context_dropout=0.3,
+    use_temporal=False, raw_train=None, mask_train=None,
+    raw_test=None, mask_test=None, raw_val=None, mask_val=None,
 ):
     """Train and evaluate a CAAA model variant.
 
@@ -58,6 +60,13 @@ def run_caaa_variant(
         film_mode: FiLM conditioning mode (multiplicative, additive, tadam).
         context_dropout: Probability of zeroing out context features during
             training.
+        use_temporal: Whether to enable the temporal encoder branch.
+        raw_train: Optional raw time-series tensors for training.
+        mask_train: Optional service masks for training.
+        raw_test: Optional raw time-series tensors for test.
+        mask_test: Optional service masks for test.
+        raw_val: Optional raw time-series tensors for validation.
+        mask_val: Optional service masks for validation.
 
     Returns:
         Dictionary of evaluation metrics.
@@ -65,7 +74,7 @@ def run_caaa_variant(
     torch.manual_seed(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = CAAAModel(input_dim=N_FEATURES, hidden_dim=64, n_classes=2,
-                      film_mode=film_mode)
+                      film_mode=film_mode, use_temporal=use_temporal)
     trainer = CAAATrainer(
         model, learning_rate=lr, device=device,
         use_context_loss=use_context_loss,
@@ -80,8 +89,10 @@ def run_caaa_variant(
         X_val=X_val, y_val=y_val,
         epochs=epochs,
         batch_size=batch_size, early_stopping_patience=early_stopping_patience,
+        raw_train=raw_train, mask_train=mask_train,
+        raw_val=raw_val, mask_val=mask_val,
     )
-    y_pred = trainer.predict(X_test)
+    y_pred = trainer.predict(X_test, raw=raw_test, mask=mask_test)
     return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
 
 
@@ -173,6 +184,95 @@ def run_catboost(X_train, y_train, X_test, y_test, naive_fp, seed=42):
     clf = CatBoostBaseline(random_state=seed)
     clf.fit(X_train, y_train)
     y_pred = clf.predict(X_test)
+    return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
+
+
+def pretrain_on_synthetic(
+    n_fault=500, n_load=500, seed=42, epochs=50, batch_size=32, lr=0.001,
+    film_mode="tadam", unknown_weight=0.2, context_dropout=0.3,
+):
+    """Pre-train CAAA on synthetic data and return checkpoint path.
+
+    Generates synthetic data with genuine external context and trains a CAAA
+    model. The checkpoint can then be loaded for fine-tuning on real data.
+    """
+    save_dir = os.path.join(os.path.dirname(__file__), "..", "models", "pretrained")
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(
+        save_dir,
+        f"caaa_pretrained_synthetic_{n_fault}f_{n_load}l_seed{seed}.pt",
+    )
+
+    fault_cases, load_cases = generate_combined_dataset(
+        n_fault=n_fault, n_load=n_load,
+        systems=["online-boutique", "sock-shop", "train-ticket"],
+        seed=seed, include_hard=True,
+    )
+    all_cases = fault_cases + load_cases
+    labels = np.array([0 if c.label == "FAULT" else 1 for c in all_cases])
+
+    extractor = FeatureExtractor(context_mode="external")
+    X = extractor.extract_batch(all_cases).astype(np.float32)
+
+    X_train_raw, X_val_raw, y_train, y_val = train_test_split(
+        X, labels, test_size=0.15, random_state=seed, stratify=labels,
+    )
+    scaler = NaNSafeScaler()
+    X_train = scaler.fit_transform(X_train_raw).astype(np.float32)
+    X_val = scaler.transform(X_val_raw).astype(np.float32)
+
+    torch.manual_seed(seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = CAAAModel(
+        input_dim=N_FEATURES, hidden_dim=64, n_classes=2, film_mode=film_mode,
+    )
+    trainer = CAAATrainer(
+        model, learning_rate=lr, device=device,
+        use_context_loss=True, loss_type="context_consistency",
+        unknown_weight=unknown_weight, loss_variant="gated",
+        context_dropout_p=context_dropout,
+    )
+    trainer.train(
+        X_train, y_train, X_val=X_val, y_val=y_val,
+        epochs=epochs, batch_size=batch_size, early_stopping_patience=15,
+    )
+    trainer.save_model(save_path)
+    print(f"  Pre-trained model saved to {save_path}")
+    return save_path
+
+
+def run_caaa_pretrained(
+    X_train, y_train, X_test, y_test, naive_fp,
+    pretrain_path, epochs=30, batch_size=32, lr=0.0003,
+    seed=42, X_val=None, y_val=None,
+    unknown_weight=0.2, loss_variant="clamp",
+    film_mode="tadam", context_dropout=0.3,
+):
+    """Fine-tune a pre-trained CAAA model on real data.
+
+    Loads only model weights from the checkpoint (discards optimizer state)
+    and trains with a lower learning rate to preserve representations.
+    """
+    torch.manual_seed(seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = CAAAModel(
+        input_dim=N_FEATURES, hidden_dim=64, n_classes=2, film_mode=film_mode,
+    )
+    checkpoint = torch.load(pretrain_path, map_location=device, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    trainer = CAAATrainer(
+        model, learning_rate=lr, device=device,
+        use_context_loss=True, loss_type="context_consistency",
+        unknown_weight=unknown_weight, loss_variant=loss_variant,
+        context_dropout_p=context_dropout,
+    )
+    trainer.train(
+        X_train, y_train, X_val=X_val, y_val=y_val,
+        epochs=epochs, batch_size=batch_size, early_stopping_patience=10,
+    )
+    y_pred = trainer.predict(X_test)
     return compute_all_metrics(y_test, y_pred, baseline_fp_rate=naive_fp)
 
 
@@ -317,6 +417,13 @@ def main():
                         help="FiLM conditioning mode")
     parser.add_argument("--context-dropout", type=float, default=0.3,
                         help="Probability of zeroing out context features during training")
+    parser.add_argument("--temporal", action="store_true",
+                        help="Enable temporal encoder branch (processes raw time-series)")
+    parser.add_argument("--pool", type=str, default="none",
+                        choices=["none", "systems", "all"],
+                        help="Pooling scope: none (per-system), systems (pool 3 systems within dataset), all (all datasets x all systems)")
+    parser.add_argument("--pretrain", action="store_true",
+                        help="Pre-train on synthetic data before fine-tuning on real")
 
     args = parser.parse_args()
 
@@ -325,48 +432,65 @@ def main():
         args.loss_variant = "clamp"
         print("  [Auto] Using loss_variant='clamp' for RCAEval (context is derived, not external)")
 
-    # Handle --dataset all / --system all by recursing into per-combo runs
+    # Handle --dataset all / --system all by recursing into per-combo runs.
+    # Pooling modes change the recursion:
+    #   --pool all:     no recursion — single run loads everything
+    #   --pool systems: recurse per-dataset only (each run pools 3 systems)
+    #   --pool none:    original per-(dataset, system) recursion
     if args.data == "rcaeval" and (args.dataset == "all" or args.system == "all"):
-        datasets = ["RE1", "RE2", "RE3"] if args.dataset == "all" else [args.dataset]
-        systems = (
-            ["online-boutique", "sock-shop", "train-ticket"]
-            if args.system == "all" else [args.system]
-        )
-        csv_paths = []
-        import subprocess
-        for ds in datasets:
-            for sys_name in systems:
-                print(f"\n{'='*60}")
-                print(f"  ABLATION: {ds} / {sys_name}")
-                print(f"{'='*60}")
-                # Build command by replacing --dataset/--system values
-                # and forwarding all other args (including --shap, --calibration, etc.)
-                cmd = [sys.executable, __file__]
-                skip_next = False
-                for j, a in enumerate(sys.argv[1:]):
-                    if skip_next:
-                        skip_next = False
-                        continue
-                    if a == "--dataset":
+        # --pool all: skip recursion entirely, load all data in one run
+        if args.pool == "all":
+            print("  [Pool=all] Loading all datasets x all systems in one run")
+            args.dataset = "RE1"  # placeholder — overridden by pool=all below
+            args.system = "online-boutique"
+            # Fall through to main loop (pooling override happens later)
+        else:
+            datasets = ["RE1", "RE2", "RE3"] if args.dataset == "all" else [args.dataset]
+            if args.pool == "systems":
+                # Pool all systems within each dataset — one run per dataset
+                systems = ["online-boutique"]  # placeholder — overridden by pool=systems
+            else:
+                systems = (
+                    ["online-boutique", "sock-shop", "train-ticket"]
+                    if args.system == "all" else [args.system]
+                )
+            csv_paths = []
+            import subprocess
+            for ds in datasets:
+                for sys_name in systems:
+                    label = f"{ds} / all-systems-pooled" if args.pool == "systems" else f"{ds} / {sys_name}"
+                    print(f"\n{'='*60}")
+                    print(f"  ABLATION: {label}")
+                    print(f"{'='*60}")
+                    cmd = [sys.executable, __file__]
+                    skip_next = False
+                    for j, a in enumerate(sys.argv[1:]):
+                        if skip_next:
+                            skip_next = False
+                            continue
+                        if a == "--dataset":
+                            cmd.extend(["--dataset", ds])
+                            skip_next = True
+                        elif a == "--system":
+                            cmd.extend(["--system", sys_name])
+                            skip_next = True
+                        else:
+                            cmd.append(a)
+                    if "--dataset" not in cmd:
                         cmd.extend(["--dataset", ds])
-                        skip_next = True
-                    elif a == "--system":
+                    if "--system" not in cmd:
                         cmd.extend(["--system", sys_name])
-                        skip_next = True
+                    result = subprocess.run(cmd, check=False)
+                    if result.returncode != 0:
+                        print(f"  Warning: ablation for {label} failed (exit {result.returncode})")
+                    if args.pool == "systems":
+                        suffix = f"{ds}_pooled-systems"
+                        csv_paths.append((ds, "pooled", f"outputs/results/ablation_results_{suffix}.csv"))
                     else:
-                        cmd.append(a)
-                # Ensure --dataset and --system are present even if not in original argv
-                if "--dataset" not in cmd:
-                    cmd.extend(["--dataset", ds])
-                if "--system" not in cmd:
-                    cmd.extend(["--system", sys_name])
-                result = subprocess.run(cmd, check=False)
-                if result.returncode != 0:
-                    print(f"  Warning: ablation for {ds}/{sys_name} failed (exit {result.returncode})")
-                suffix = f"{ds}_{sys_name}"
-                csv_paths.append((ds, sys_name, f"outputs/results/ablation_results_{suffix}.csv"))
-        merge_results(csv_paths)
-        return
+                        suffix = f"{ds}_{sys_name}"
+                        csv_paths.append((ds, sys_name, f"outputs/results/ablation_results_{suffix}.csv"))
+            merge_results(csv_paths)
+            return
 
     metrics_to_track = ["accuracy", "f1", "f1_macro", "mcc", "fp_rate", "fault_recall", "fp_reduction"]
 
@@ -386,7 +510,10 @@ def main():
         "XGBoost",
         "LightGBM",
         "CatBoost",
+        "CatBoost (with context)",
         "CAAA+CatBoost Hybrid",
+        "CAAA (pretrained)",
+        "CAAA (temporal)",
         "Rule-Based",
         "Naive",
     ]
@@ -394,20 +521,66 @@ def main():
     # Collect results: {variant: {metric: [values across runs]}}
     all_results = {v: {m: [] for m in metrics_to_track} for v in variants}
 
+    # Print configuration summary
+    print()
+    print("=" * 70)
+    print("  CAAA ABLATION STUDY")
+    print("=" * 70)
+    data_label = args.data.upper()
+    if args.data == "rcaeval":
+        if args.pool == "all":
+            data_label += " (all datasets x all systems, pooled)"
+        elif args.pool == "systems":
+            data_label += f" ({args.dataset} x all systems, pooled)"
+        else:
+            data_label += f" ({args.dataset} / {args.system})"
+    print(f"  Data:       {data_label}")
+    print(f"  Runs:       {args.n_runs}")
+    print(f"  Epochs:     {args.epochs}")
+    print(f"  FiLM mode:  {args.film_mode}")
+    if args.pretrain and args.data == "rcaeval":
+        print(f"  Pre-train:  Yes (500+500 synthetic)")
+    if args.temporal:
+        print(f"  Temporal:   Yes (LITE 1D-CNN + cross-service attention)")
+    print("=" * 70)
+
+    # Pre-train on synthetic data once if requested (reused across all runs)
+    pretrain_path = None
+    if args.pretrain and args.data == "rcaeval":
+        print("\n  Pre-training on synthetic data (500 fault + 500 load)...")
+        pretrain_path = pretrain_on_synthetic(
+            n_fault=500, n_load=500, seed=args.base_seed,
+            epochs=50, batch_size=32, lr=0.001,
+            film_mode=args.film_mode,
+            unknown_weight=args.unknown_weight,
+            context_dropout=args.context_dropout,
+        )
+
     use_cv = args.cv_folds > 0
     n_iterations = args.cv_folds if use_cv else args.n_runs
 
     for run_idx in range(n_iterations if not use_cv else 1):
         run_seed = args.base_seed + run_idx
         if not use_cv:
-            print(f"\n--- Run {run_idx + 1}/{args.n_runs} (seed={run_seed}) ---")
+            bar_len = 20
+            filled = int(bar_len * run_idx / args.n_runs)
+            bar = "█" * filled + "░" * (bar_len - filled)
+            print(f"\n  [{bar}] Run {run_idx + 1}/{args.n_runs} (seed={run_seed})")
 
         set_seed(run_seed if not use_cv else args.base_seed)
 
         # Generate dataset
         if args.data == "rcaeval":
+            # Apply pooling overrides
+            rcaeval_dataset = args.dataset
+            rcaeval_system = args.system
+            if args.pool == "systems":
+                rcaeval_system = ["online-boutique", "sock-shop", "train-ticket"]
+            elif args.pool == "all":
+                rcaeval_dataset = ["RE1", "RE2", "RE3"]
+                rcaeval_system = ["online-boutique", "sock-shop", "train-ticket"]
             fault_cases, load_cases = generate_rcaeval_dataset(
-                dataset=args.dataset, system=args.system,
+                dataset=rcaeval_dataset, system=rcaeval_system,
                 n_load_per_fault=args.load_ratio,
                 data_dir=args.data_dir, seed=run_seed if not use_cv else args.base_seed,
             )
@@ -421,6 +594,8 @@ def main():
         labels = np.array([0 if c.label == "FAULT" else 1 for c in all_cases])
         fault_types_all = np.array([c.fault_type for c in all_cases])
         difficulties_all = np.array([c.difficulty or "unknown" for c in all_cases])
+        if run_idx == 0:
+            print(f"  Dataset: {len(fault_cases)} fault + {len(load_cases)} load = {len(all_cases)} samples")
 
         # Use external context for synthetic data (where the generator creates
         # genuine operational context alongside the data) and comparison context
@@ -428,6 +603,16 @@ def main():
         ctx_mode = "external" if args.data == "synthetic" else "comparison"
         extractor = FeatureExtractor(context_mode=ctx_mode)
         X = extractor.extract_batch(all_cases).astype(np.float32)
+
+        # Extract raw time-series tensors for temporal encoder (if enabled)
+        raw_tensors = None
+        raw_masks = None
+        if args.temporal:
+            from src.features.raw_tensor_extractor import RawTensorExtractor
+            raw_extractor = RawTensorExtractor(max_services=20, seq_len=120)
+            raw_tensors, raw_masks = raw_extractor.extract_batch(all_cases)
+            if run_idx == 0:
+                print(f"  Raw tensors: {raw_tensors.shape} ({raw_tensors.nbytes / 1e6:.1f} MB)")
 
         if use_cv:
             # Generate all CV folds once — shared across all variants
@@ -460,6 +645,20 @@ def main():
                 stratify=y_train_all,
             )
 
+            # Split raw tensors/masks with same indices (for temporal encoder)
+            raw_tr = raw_te = raw_va = mask_tr = mask_te = mask_va = None
+            if raw_tensors is not None:
+                raw_all_train = raw_tensors[train_idx]
+                raw_te = raw_tensors[test_idx]
+                mask_all_train = raw_masks[train_idx]
+                mask_te = raw_masks[test_idx]
+                # Further split train -> train + val (same indices as X split)
+                raw_tr, raw_va, mask_tr, mask_va = train_test_split(
+                    raw_all_train, mask_all_train, test_size=0.125,
+                    random_state=run_seed if not use_cv else args.base_seed,
+                    stratify=y_train_all,
+                )
+
             # Scale features (fit on train only) for neural models
             scaler = NaNSafeScaler()
             X_train = scaler.fit_transform(X_train_raw).astype(np.float32)
@@ -469,6 +668,15 @@ def main():
             # Keep unscaled copies for tree-based baselines (scale-invariant)
             X_train_unscaled = X_train_raw
             X_test_unscaled = X_test_raw
+
+            # Context-free arrays for tree baselines (39 features).
+            # Delete (not zero) context columns so trees get a clean input
+            # without wasting splits on constant-zero placeholder columns.
+            # This represents the real-world scenario: traditional anomaly
+            # detectors don't have access to operational context.
+            _ctx_s, _ctx_e = CONTEXT_RANGE
+            X_train_no_ctx = np.delete(X_train_unscaled, range(_ctx_s, _ctx_e), axis=1)
+            X_test_no_ctx = np.delete(X_test_unscaled, range(_ctx_s, _ctx_e), axis=1)
 
             # Naive baseline FP rate
             naive = NaiveBaseline()
@@ -665,29 +873,35 @@ def main():
             for k in metrics_to_track:
                 all_results["Stat + Service-Level"][k].append(m.get(k, 0.0))
 
-            # --- Baseline RF (scale-invariant, uses unscaled features) ---
+            # --- Baseline RF (no context — fair comparison) ---
             print("  Baseline RF...")
-            m = run_baseline_rf(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
+            m = run_baseline_rf(X_train_no_ctx, y_train, X_test_no_ctx, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["Baseline RF"][k].append(m.get(k, 0.0))
 
-            # --- XGBoost (scale-invariant, uses unscaled features) ---
+            # --- XGBoost (no context — fair comparison) ---
             print("  XGBoost...")
-            m = run_xgboost(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
+            m = run_xgboost(X_train_no_ctx, y_train, X_test_no_ctx, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["XGBoost"][k].append(m.get(k, 0.0))
 
-            # --- LightGBM (scale-invariant, uses unscaled features) ---
+            # --- LightGBM (no context — fair comparison) ---
             print("  LightGBM...")
-            m = run_lightgbm(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
+            m = run_lightgbm(X_train_no_ctx, y_train, X_test_no_ctx, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["LightGBM"][k].append(m.get(k, 0.0))
 
-            # --- CatBoost (scale-invariant, uses unscaled features) ---
+            # --- CatBoost (no context — fair comparison) ---
             print("  CatBoost...")
-            m = run_catboost(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
+            m = run_catboost(X_train_no_ctx, y_train, X_test_no_ctx, y_test, naive_fp, seed=run_seed)
             for k in metrics_to_track:
                 all_results["CatBoost"][k].append(m.get(k, 0.0))
+
+            # --- CatBoost (with context) — upper-bound reference ---
+            print("  CatBoost (with context)...")
+            m = run_catboost(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp, seed=run_seed)
+            for k in metrics_to_track:
+                all_results["CatBoost (with context)"][k].append(m.get(k, 0.0))
 
             # --- CAAA+CatBoost Hybrid ---
             print("  CAAA+CatBoost Hybrid...")
@@ -729,7 +943,50 @@ def main():
             for k in metrics_to_track:
                 all_results["CAAA+CatBoost Hybrid"][k].append(m.get(k, 0.0))
 
-            # --- Rule-Based (uses unscaled features) ---
+            # --- CAAA (pretrained) — fine-tune pre-trained model on real data ---
+            if pretrain_path is not None:
+                print("  CAAA (pretrained)...")
+                m = run_caaa_pretrained(
+                    X_train, y_train, X_test, y_test, naive_fp,
+                    pretrain_path=pretrain_path,
+                    epochs=args.epochs, batch_size=args.batch_size,
+                    lr=0.0003, seed=run_seed,
+                    X_val=X_val, y_val=y_val,
+                    unknown_weight=args.unknown_weight,
+                    loss_variant=args.loss_variant,
+                    film_mode=args.film_mode,
+                    context_dropout=args.context_dropout,
+                )
+                for k in metrics_to_track:
+                    all_results["CAAA (pretrained)"][k].append(m.get(k, 0.0))
+            else:
+                for k in metrics_to_track:
+                    all_results["CAAA (pretrained)"][k].append(0.0)
+
+            # --- CAAA (temporal) — temporal encoder + cross-service attention ---
+            if args.temporal and raw_tr is not None:
+                print("  CAAA (temporal)...")
+                m = run_caaa_variant(
+                    X_train, y_train, X_test, y_test, naive_fp,
+                    args.epochs, args.batch_size, args.lr,
+                    use_context_loss=True, seed=run_seed,
+                    X_val=X_val, y_val=y_val,
+                    unknown_weight=args.unknown_weight,
+                    loss_variant=args.loss_variant,
+                    film_mode=args.film_mode,
+                    context_dropout=args.context_dropout,
+                    use_temporal=True,
+                    raw_train=raw_tr, mask_train=mask_tr,
+                    raw_test=raw_te, mask_test=mask_te,
+                    raw_val=raw_va, mask_val=mask_va,
+                )
+                for k in metrics_to_track:
+                    all_results["CAAA (temporal)"][k].append(m.get(k, 0.0))
+            else:
+                for k in metrics_to_track:
+                    all_results["CAAA (temporal)"][k].append(0.0)
+
+            # --- Rule-Based (uses context — tests simple context rules) ---
             print("  Rule-Based...")
             m = run_rule_based(X_train_unscaled, y_train, X_test_unscaled, y_test, naive_fp)
             for k in metrics_to_track:
@@ -754,14 +1011,38 @@ def main():
     n_evals = args.cv_folds if use_cv else args.n_runs
     eval_label = f"{args.cv_folds}-fold CV" if use_cv else f"{args.n_runs} runs"
     print()
+    print()
     print("=" * 106)
-    print(f"ABLATION STUDY RESULTS (mean ± std over {eval_label})")
+    print(f"  ABLATION STUDY RESULTS (mean ± std over {eval_label})")
     print("=" * 106)
-    header = f"{'Variant':<22s}{'Accuracy':>12s}{'F1':>12s}{'F1 Macro':>12s}{'MCC':>12s}{'FP Rate':>12s}{'Recall':>12s}{'FP Red.':>12s}"
+    header = f"  {'Variant':<24s}{'Accuracy':>12s}{'F1':>12s}{'F1 Macro':>12s}{'MCC':>12s}{'FP Rate':>12s}{'Recall':>12s}{'FP Red.':>12s}"
     print(header)
-    print("-" * 106)
+    print("  " + "-" * 102)
+
+    # Group variants for visual clarity
+    _ablation_variants = {"No Context Features", "No Context Loss", "No Behavioral",
+                          "Context Only", "Statistical Only", "Stat + Service-Level"}
+    _tree_variants = {"Baseline RF", "XGBoost", "LightGBM", "CatBoost",
+                      "CatBoost (with context)", "CAAA+CatBoost Hybrid"}
+    _printed_sep = set()
+
     for v in variants:
         s = summary[v]
+        # Skip variants that were not run (all zeros)
+        if s["accuracy_mean"] == 0.0 and s["accuracy_std"] == 0.0:
+            continue
+
+        # Add separator between groups
+        if v in _ablation_variants and "ablation" not in _printed_sep:
+            print("  " + "·" * 102)
+            _printed_sep.add("ablation")
+        elif v in _tree_variants and "tree" not in _printed_sep:
+            print("  " + "·" * 102)
+            _printed_sep.add("tree")
+        elif v in {"Rule-Based", "Naive"} and "baseline" not in _printed_sep:
+            print("  " + "·" * 102)
+            _printed_sep.add("baseline")
+
         acc = f"{s['accuracy_mean']:.2f}±{s['accuracy_std']:.2f}"
         f1 = f"{s['f1_mean']:.2f}±{s['f1_std']:.2f}"
         f1m = f"{s['f1_macro_mean']:.2f}±{s['f1_macro_std']:.2f}"
@@ -769,8 +1050,34 @@ def main():
         fpr = f"{s['fp_rate_mean']:.2f}±{s['fp_rate_std']:.2f}"
         fr = f"{s['fault_recall_mean']:.2f}±{s['fault_recall_std']:.2f}"
         fpred = f"{s['fp_reduction_mean']*100:.1f}±{s['fp_reduction_std']*100:.1f}%"
-        print(f"{v:<22s}{acc:>12s}{f1:>12s}{f1m:>12s}{mcc:>12s}{fpr:>12s}{fr:>12s}{fpred:>12s}")
+
+        # Highlight key variants
+        marker = ">>>" if v == "Full CAAA" else "   "
+        if v == "CAAA (pretrained)" or v == "CAAA (temporal)":
+            marker = " * "
+        print(f"{marker} {v:<23s}{acc:>12s}{f1:>12s}{f1m:>12s}{mcc:>12s}{fpr:>12s}{fr:>12s}{fpred:>12s}")
     print("=" * 106)
+
+    # Print key comparison summary
+    caaa_f1 = summary["Full CAAA"]["f1_mean"]
+    best_tree_name = max(
+        [v for v in ["Baseline RF", "XGBoost", "LightGBM", "CatBoost"] if summary[v]["accuracy_mean"] > 0],
+        key=lambda v: summary[v]["f1_mean"],
+    )
+    best_tree_f1 = summary[best_tree_name]["f1_mean"]
+    delta = (caaa_f1 - best_tree_f1) * 100
+    sign = "+" if delta >= 0 else ""
+    print(f"\n  Key comparison: Full CAAA ({caaa_f1:.1%}) vs {best_tree_name} ({best_tree_f1:.1%}) = {sign}{delta:.1f}pp")
+    if "CAAA (pretrained)" in summary and summary["CAAA (pretrained)"]["accuracy_mean"] > 0:
+        pt_f1 = summary["CAAA (pretrained)"]["f1_mean"]
+        delta_pt = (pt_f1 - best_tree_f1) * 100
+        sign_pt = "+" if delta_pt >= 0 else ""
+        print(f"  Key comparison: CAAA pretrained ({pt_f1:.1%}) vs {best_tree_name} ({best_tree_f1:.1%}) = {sign_pt}{delta_pt:.1f}pp")
+    if "CAAA (temporal)" in summary and summary["CAAA (temporal)"]["accuracy_mean"] > 0:
+        temp_f1 = summary["CAAA (temporal)"]["f1_mean"]
+        delta_temp = (temp_f1 - best_tree_f1) * 100
+        sign_temp = "+" if delta_temp >= 0 else ""
+        print(f"  Key comparison: CAAA temporal ({temp_f1:.1%}) vs {best_tree_name} ({best_tree_f1:.1%}) = {sign_temp}{delta_temp:.1f}pp")
 
     # Per-fault-type breakdown for Full CAAA on last fold
     print()
@@ -847,7 +1154,12 @@ def main():
     csv_dir = "outputs/results"
     os.makedirs(csv_dir, exist_ok=True)
     if args.data == "rcaeval":
-        suffix = f"{args.dataset}_{args.system}"
+        if args.pool == "all":
+            suffix = "all_pooled"
+        elif args.pool == "systems":
+            suffix = f"{args.dataset}_pooled-systems"
+        else:
+            suffix = f"{args.dataset}_{args.system}"
     else:
         suffix = "synthetic"
     csv_path = os.path.join(csv_dir, f"ablation_results_{suffix}.csv")
@@ -876,20 +1188,24 @@ def main():
         os.makedirs(shap_dir, exist_ok=True)
         print("\nGenerating SHAP plots on last fold data...")
 
-        # Baseline RF (fast, uses unscaled features)
+        # Feature names for context-free baselines (39 features)
+        ctx_s, ctx_e = CONTEXT_RANGE
+        no_ctx_feature_names = [n for i, n in enumerate(ALL_FEATURE_NAMES) if i < ctx_s or i >= ctx_e]
+
+        # Baseline RF (no context, 39 features)
         print("  Baseline RF SHAP...")
         rf = BaselineClassifier(random_state=args.base_seed)
-        rf.fit(X_train_unscaled, y_train)
+        rf.fit(X_train_no_ctx, y_train)
         plot_shap_summary(
-            rf, X_test_unscaled, ALL_FEATURE_NAMES,
+            rf, X_test_no_ctx, no_ctx_feature_names,
             save_path=os.path.join(shap_dir, "shap_baseline_rf.png"),
         )
         plot_shap_by_class(
-            rf, X_test_unscaled, y_test, ALL_FEATURE_NAMES,
+            rf, X_test_no_ctx, y_test, no_ctx_feature_names,
             save_path=os.path.join(shap_dir, "shap_baseline_rf_by_class.png"),
         )
         plot_shap_by_fault_type(
-            rf, X_test_unscaled, list(fault_types_test), ALL_FEATURE_NAMES,
+            rf, X_test_no_ctx, list(fault_types_test), no_ctx_feature_names,
             save_path=os.path.join(shap_dir, "shap_baseline_rf_by_fault_type.png"),
         )
         print(f"  Saved to {shap_dir}/shap_baseline_rf*.png")
@@ -975,6 +1291,10 @@ def main():
         print(f"  ECE (calibrated):   {ece_cal:.4f}")
         print(f"  Temperature:        {T:.4f}")
         print(f"  Saved to {cal_dir}/")
+
+    # Clean up pre-training checkpoint
+    if pretrain_path and os.path.exists(pretrain_path):
+        os.remove(pretrain_path)
 
 
 if __name__ == "__main__":

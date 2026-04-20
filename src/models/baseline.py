@@ -284,8 +284,14 @@ class LightGBMBaseline:
             X: Feature matrix of shape (n_samples, n_features).
             y: Target labels of shape (n_samples,).
         """
-        self.model.fit(X, y)
+        self._n_features = X.shape[1]
+        self.model.fit(X, y, feature_name=[f"f{i}" for i in range(X.shape[1])])
         logger.info("LightGBMBaseline fitted on %d samples", len(y))
+
+    def _as_df(self, X: np.ndarray):
+        """Wrap array in a DataFrame with consistent feature names."""
+        import pandas as pd
+        return pd.DataFrame(X, columns=[f"f{i}" for i in range(X.shape[1])])
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Predicts class labels.
@@ -296,7 +302,7 @@ class LightGBMBaseline:
         Returns:
             Predicted labels of shape (n_samples,).
         """
-        return self.model.predict(X)
+        return self.model.predict(self._as_df(X))
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Predicts class probabilities.
@@ -307,7 +313,7 @@ class LightGBMBaseline:
         Returns:
             Class probabilities of shape (n_samples, n_classes).
         """
-        return self.model.predict_proba(X)
+        return self.model.predict_proba(self._as_df(X))
 
 
 class CatBoostBaseline:

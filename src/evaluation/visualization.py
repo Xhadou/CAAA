@@ -2,6 +2,7 @@
 
 import logging
 import os
+import warnings
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib
@@ -390,10 +391,15 @@ def plot_shap_summary(
         shap_values = shap_values[:, :, 1]
 
     fig = plt.figure(figsize=(10, 10))
-    shap.summary_plot(
-        shap_values, X_test, feature_names=feature_names,
-        show=False, plot_size=None,
-    )
+    # SHAP internally calls np.random.seed() for beeswarm jitter, which
+    # triggers a NumPy FutureWarning about global RNG deprecation.
+    # This is a SHAP library issue, not ours — suppress until SHAP updates.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*NumPy global RNG.*", category=FutureWarning)
+        shap.summary_plot(
+            shap_values, X_test, feature_names=feature_names,
+            show=False, plot_size=None,
+        )
     plt.tight_layout()
 
     if save_path:

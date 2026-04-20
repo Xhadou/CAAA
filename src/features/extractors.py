@@ -12,11 +12,13 @@ Bayesian change point detection before RCA improves results by 58-189%.
 from datetime import datetime as _datetime, timezone as _timezone
 import functools
 import logging
+import warnings
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
+from scipy.stats import ConstantInputWarning
 
 try:
     import ruptures as rpt
@@ -46,7 +48,9 @@ def _safe_pearsonr(x: np.ndarray, y: np.ndarray) -> float:
     if len(x) < 2 or np.std(x) == 0.0 or np.std(y) == 0.0:
         return 0.0
     try:
-        r, _ = pearsonr(x, y)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=ConstantInputWarning)
+            r, _ = pearsonr(x, y)
         return float(r) if np.isfinite(r) else 0.0
     except Exception:
         return 0.0

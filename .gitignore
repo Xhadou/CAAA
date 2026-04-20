@@ -44,3 +44,19 @@ htmlcov/
 # Worktrees
 .worktrees/
 catboost_info/
+
+# Graphify MCP tool output
+graphify-out/
+.code-review-graph/
+
+# Reference/external paper archive (not project source)
+final papers/
+
+# LaTeX build artefacts
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz

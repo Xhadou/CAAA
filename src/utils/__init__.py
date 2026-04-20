@@ -91,11 +91,17 @@ class NaNSafeScaler:
         self._scaler = StandardScaler()
 
     def fit(self, X):
-        self._scaler.fit(X)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            self._scaler.fit(X)
         return self
 
     def transform(self, X):
-        result = self._scaler.transform(X)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            result = self._scaler.transform(X)
         np.nan_to_num(result, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
         return result
 

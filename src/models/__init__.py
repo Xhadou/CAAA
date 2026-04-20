@@ -14,6 +14,7 @@ from src.models.caaa_model import CAAAModel
 from src.models.classifier import AnomalyClassifier, train_and_evaluate
 from src.models.context_module import ContextIntegrationModule
 from src.models.feature_encoder import FeatureEncoder
+from src.models.temporal_encoder import CrossServiceAttention, TemporalEncoder
 
 __all__ = [
     "CAAAModel",
@@ -30,4 +31,6 @@ __all__ = [
     "train_and_evaluate",
     "AnomalyDetector",
     "LSTMAutoencoder",
+    "TemporalEncoder",
+    "CrossServiceAttention",
 ]
