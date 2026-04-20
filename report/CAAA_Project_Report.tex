@@ -1034,69 +1034,59 @@ Combining Chapters~5, 6, and 7, two findings summarize the body of evidence:
 \paragraph{Insight 2 (Universal context).} A five-dimensional structured context slice improves every model family evaluated by $+1.3$ to $+2.3$ pp of F1. The effect is six-to-ten times larger than the best architectural gap, replicates across seeds, and is robust to the choice of model family. This is the report's strongest and most generalizable finding. The practical implication for microservice observability is concrete: regardless of which model class is deployed---neural attention stack, GBDT ensemble, or RandomForest baseline---adding a well-designed context slice captures additional signal that metric-only features miss.
 
 % ============================================================================
-% CHAPTER 8: DISCUSSION
+% CHAPTER 8: DISCUSSION, LIMITATIONS, AND CONCLUSION
 % ============================================================================
-\chapter{Discussion and Analysis}
+\chapter{Discussion, Limitations, and Conclusion}
 
-\section{Design Insights from the Experimental Journey}
+\section{When Context Helps Most}
 
-The 11-round iterative development revealed non-obvious insights:
+Context contribution is not uniform across the severity spectrum. On high-severity faults (metric signatures far from baseline), the metric signal alone is sufficient and all models exceed $99\%$ accuracy; context adds negligibly. On medium-severity faults (metrics perturbed by a factor of $\sim 0.3$), context begins to matter: it resolves ambiguous cases where a metric spike could be a moderate fault or a legitimate load event. On low-severity disguised faults (metrics scaled by $\sim 0.02$--$0.07$, produced by the \texttt{generate\_disguised\_fault} path), context is the dominant discriminator. The overall $+1.3$ to $+2.3$ pp context gain reported in Chapter~7 is concentrated in the low and medium tiers; the high tier dilutes the effect because it is trivially solvable.
 
-\textbf{Skeptical initialization is essential.} Early experiments with default FiLM initialization caused the model to overfit to context features. The bias $= -1.0$ forces the network to prove context utility through gradient-based learning.
+\section{Why Context Helps Every Architecture}
 
-\textbf{Evaluation is harder than modeling.} Three of six contributions concern evaluation methodology. The 100\% accuracy from distribution mismatch (Pitfall 1) and label leakage (Pitfall 2) could have been reported as research results in a less rigorous study. No surveyed AIOps paper discusses context metadata as a label proxy.
+The universality observed in Chapter~7 has a simple information-theoretic reading. The five-dimensional context slice carries signal that is orthogonal to metric-based features---it answers the question ``what \emph{should} we expect to see right now?'' rather than ``what \emph{did} we see?''. Every model family benefits because every model family was previously missing this orthogonal signal, not because any particular family has a special integration mechanism. A tree-based classifier splits on \texttt{event\_active}~$= 1$ and adjusts its decision boundary; a FiLM-conditioned neural network applies a scale-and-shift to its latent representation. Both capture the same conditional-independence pattern. The observed gain differences across families ($+1.28$ for \sys{} up to $+2.30$ for RandomForest) reflect how efficiently each model's fitting procedure can use the new signal given its hyperparameters and training budget, not a fundamental difference in what the signal can offer.
 
-\textbf{The data processing inequality constrains derived features.} Metric-derived context features added only 0.8\% improvement---redundant with existing features because derived from the same data.
+\section{Why the Architectural Gap Is Small}
 
-\textbf{Simple models match complex ones on current benchmarks.} Our finding aligns with DiagMLP~\cite{diagmlp2025}, which showed an MLP matches GNNs across five datasets---a structural benchmark limitation motivating our severity-tiered synthetic data.
-
-\section{When Does Context Help Most?}
-
-Context provides asymmetric value. On ``easy'' cases (30\%), all models achieve $\sim$99\%. On ``disguised faults'' (35\%), context is the \textit{only} discriminator. The 5.7\% overall improvement is concentrated in the hard tier, where the advantage exceeds 15\%.
+\sys{}'s $+0.21$ pp lead over CatBoost with context at $n = 40{,}000$ hard samples is statistically detectable but modest. Two factors contribute. First, the hard-difficulty task still leaves room for further difficulty increase; both models operate well below any absolute ceiling, so tree-based inductive biases still find the task tractable. Second, the 44-dimensional feature vector is heavily engineered---statistical, behavioural, and service-level aggregations---which handles much of the work that a more capable encoder might otherwise do. A more data-hungry neural architecture (deeper encoder, richer temporal modelling) might open a larger gap, but would also require more training data to avoid overfitting. The modesty of the effect is consistent with~\cite{mcelfresh2023neural}'s finding that neural networks only dominate trees in tabular regimes when sample counts are very large or feature structure is unusually regular.
 
 \section{Limitations}
 
-\begin{itemize}
-    \item \textbf{Trees still win:} CatBoost outperforms neural CAAA by 1--3\%. PLE and TADAM narrow but do not close the gap on 200-sample datasets.
-    \item \textbf{Context mode dependency:} External context requires operational system integration. Comparison mode works without external metadata but provides weaker signal.
-    \item \textbf{Sample efficiency:} At 200 training samples, the 19,206-parameter model is heavily constrained.
-    \item \textbf{Binary classification:} FAULT vs.\ EXPECTED\_LOAD with post-hoc UNKNOWN.
-    \item \textbf{No GNN component:} Service-level graph information is captured via aggregation features, not structural reasoning.
-\end{itemize}
-
-
-% ============================================================================
-% CHAPTER 7: CONCLUSION
-% ============================================================================
-\chapter{Conclusion and Future Work}
-
-\section{Summary of Contributions}
-
-This project presented \sys{}, a context-aware anomaly attribution framework for false positive reduction in cloud microservice monitoring. The Context Integration Module with TADAM-style FiLM conditioning and skeptical confidence gating enables selective context incorporation while preventing noise amplification. PLE closes the neural-tree gap to 1.0\% on synthetic data. The Context Consistency Loss with gated unknown-context penalty resolves false positive inflation.
-
-On synthetic data, \sys{} achieves 93.5\% accuracy with 91.3\% FP reduction and 95.8\% fault recall. On RCAEval real traces, it achieves 92.5\% F1 with 94.0\% recall. Ablation across 17 variants confirms: context provides 5.7pp improvement on challenging cases; loss design critically determines success; and FiLM conditioning with proper regularization operates effectively on small tabular data.
-
-\section{Key Lessons Learned}
-
-\begin{itemize}
-    \item \textbf{Evaluate before you celebrate:} The three evaluation pitfalls (distribution mismatch, label leakage, reference contamination) each produced misleading 100\% accuracy before being identified and fixed.
-    \item \textbf{Skeptical defaults:} Initializing the confidence gate with bias $=-1.0$ was the single most impactful design decision.
-    \item \textbf{Context is complementary:} Context Only achieves 76.8\%---useful but insufficient without metric analysis.
-    \item \textbf{Trees remain strong:} On small tabular data, gradient-boosted trees maintain a fundamental advantage through implicit feature selection.
-    \item \textbf{The hybrid approach works:} CAAA+CatBoost (93.3\% real F1) demonstrates FiLM-conditioned embeddings provide complementary value to tree classifiers.
-\end{itemize}
-
-\section{Future Directions}
+We identify five limitations that a future reviewer might legitimately raise.
 
 \begin{enumerate}
-    \item \textbf{TabM integration:} Parameter-efficient MLP ensembling~\cite{gorishniy2025tabm} to further close the neural-tree gap.
-    \item \textbf{TabPFN ceiling:} Evaluate the tabular foundation model~\cite{hollmann2024tabpfn} as an upper bound on achievable accuracy.
-    \item \textbf{Multi-root-cause scenarios:} Extend to set-valued predictions for concurrent failures.
-    \item \textbf{Production AIOps integration:} Deploy with real-time operational context from incident management and deployment pipelines.
-    \item \textbf{GNN augmentation:} Incorporate structural graph reasoning over service topology.
-    \item \textbf{Explainability:} Generate natural language explanations of attribution decisions.
+    \item \textbf{Synthetic-to-real transfer is directional, not magnitude-matched.} The universal-context finding is demonstrated on synthetic data at $n = 40{,}000$, where context gains are $+1.3$ to $+2.3$ pp. On real RCAEval data, CatBoost with context beats CatBoost without by $+0.29$ pp pooled (Chapter~5). The sign and ranking are preserved, but the magnitude is smaller. Whether this reflects task difficulty, context-annotation sparsity in real traces, or both is unresolved.
+
+    \item \textbf{The neural-over-tree crossover is small.} $+0.21$ pp F1 at a specific difficulty level is a narrow empirical claim. Generalizing it to ``\sys{} is a superior architecture for microservice anomaly attribution'' would overreach. We present it as crossover-regime confirmation, not architectural dominance.
+
+    \item \textbf{A single synthetic task family.} All scaling results come from one generative pipeline with two difficulty levels. Replication on orthogonal synthetic task families (different fault distributions, different service-graph scales, different context-feature sets) would strengthen external validity.
+
+    \item \textbf{Minimal context slice.} The 5-dimensional context we evaluated is deliberately compact. Richer context (deploy delta magnitudes, seasonality beyond time-of-day, historical incident proximity) may amplify the universal-context effect---or dilute it if the added dimensions are noisier. We have not characterized the scaling of context contribution with context dimensionality.
+
+    \item \textbf{Benchmark coverage.} Real-data results cover three microservice systems and three dataset variants from RCAEval. Domain transfer to different microservice stacks (service meshes, serverless functions, batch data pipelines) is untested.
 \end{enumerate}
 
+\section{Future Work}
+
+Five directions are natural extensions of this work:
+
+\begin{enumerate}
+    \item \textbf{Tabular foundation models as ceilings.} TabPFN~\cite{hollmann2024tabpfn} and TabM~\cite{gorishniy2025tabm} are recent tabular-ML advances that could serve as upper-bound references for the crossover study: if a foundation model still leaves a context gain across model families, the universal-context finding holds more broadly.
+
+    \item \textbf{Context-dimensionality scaling.} Repeat the scaling study with context slices of varying dimensionality (1-d, 3-d, 5-d, 10-d, 20-d) to characterize the trade-off between context signal and noise.
+
+    \item \textbf{Multi-root-cause attribution.} Extend the output space from a single FAULT/LOAD label to set-valued attribution over concurrent service failures, aligning with multi-cause benchmarks.
+
+    \item \textbf{Production integration with operational context sources.} Integrate with real deployment-tracking systems (CI/CD pipelines, incident-management platforms) to test whether real-time context ingestion reproduces the synthetic findings at deployment scale.
+
+    \item \textbf{Natural-language explanations of attribution decisions.} Generate human-readable rationales that cite the specific context and metric features driving each prediction, as a bridge from model output to operator trust.
+\end{enumerate}
+
+\section{Conclusion}
+
+We set out to answer three questions. Does operational context materially improve anomaly attribution? Yes---by $+1.3$ to $+2.3$ pp F1 across every model family evaluated, a larger and more reliable effect than any architectural choice we tested. Does a context-conditioned neural architecture (\sys{}) outperform the strongest tree baseline? Only marginally, and only once sample sizes reach the crossover regime ($n \approx 20{,}000$ on harder tasks); at the scale of current real benchmarks, gradient-boosted trees should be preferred. What methodological safeguards are needed? Five---context-independent label sampling, randomized context assignment, pre-injection splits, counterfactual baselines via RNG forking, and stratified splits---which together close the leakage paths we were able to detect and produce trustworthy synthetic-data results.
+
+The framing we propose is: \sys{} is a principled instantiation of a universal context-integration methodology, not an architecture-specific win. The universal-context finding is the reproducible, architecture-independent scientific contribution; the \sys{} crossover is a confirmation that context-conditioned neural architectures compete honestly with strong tree baselines once sample size permits. Practitioners deploying anomaly-attribution systems today should prefer gradient-boosted trees on small datasets and use the present results to argue for adding a structured context feature slice---regardless of which model family they ship.
 
 % ============================================================================
 % BIBLIOGRAPHY
