@@ -762,8 +762,46 @@ Figure~\ref{fig:scaling-default} visualizes F1 as a function of sample size for 
 
 \begin{figure}[h]
     \centering
-    \includegraphics[width=0.95\textwidth]{../outputs/results/scaling_curve.png}
-    \caption{Default-difficulty scaling: F1 vs.\ total sample size across ten model variants. Both \sys{} and CatBoost-with-context saturate near $97\%$ F1; the gap is within seed-level noise at 40{,}000 samples.}
+    \begin{tikzpicture}
+    \begin{axis}[
+        width=0.85\textwidth,
+        height=7cm,
+        xlabel={Total samples ($n$)},
+        ylabel={F1},
+        xmode=log,
+        log basis x=10,
+        xtick={200,500,1000,2000,5000,10000,20000,40000},
+        xticklabels={200,500,1k,2k,5k,10k,20k,40k},
+        ymin=0.88, ymax=0.98,
+        grid=major,
+        grid style={dashed,gray!30},
+        legend pos=south east,
+        legend style={font=\footnotesize, cells={anchor=west}},
+        every axis plot/.append style={line width=1pt, mark size=2pt},
+    ]
+    \addplot[color=blue!70!black, mark=*] coordinates {
+        (200,0.9500) (500,0.9365) (1000,0.9483) (2000,0.9567)
+        (5000,0.9610) (10000,0.9623) (20000,0.9664) (40000,0.9714)
+    };
+    \addlegendentry{Full \sys{}}
+    \addplot[color=red!80!black, mark=square*] coordinates {
+        (200,0.9083) (500,0.9533) (1000,0.9583) (2000,0.9633)
+        (5000,0.9640) (10000,0.9645) (20000,0.9657) (40000,0.9698)
+    };
+    \addlegendentry{CatBoost (with context)}
+    \addplot[color=orange!80!black, mark=triangle*] coordinates {
+        (200,0.8915) (500,0.9132) (1000,0.9282) (2000,0.9350)
+        (5000,0.9453) (10000,0.9483) (20000,0.9470) (40000,0.9548)
+    };
+    \addlegendentry{CatBoost (no context)}
+    \addplot[color=gray!70!black, mark=diamond*, dashed] coordinates {
+        (200,0.8995) (500,0.8866) (1000,0.9066) (2000,0.9189)
+        (5000,0.9393) (10000,0.9483) (20000,0.9546) (40000,0.9594)
+    };
+    \addlegendentry{\sys{} (no context)}
+    \end{axis}
+    \end{tikzpicture}
+    \caption{Default-difficulty scaling: F1 vs.\ total sample size. Both \sys{} and CatBoost-with-context saturate near $97\%$ F1; the gap at 40{,}000 is $+0.16$ pp (within seed-level noise, $p=0.09$).}
     \label{fig:scaling-default}
 \end{figure}
 
@@ -796,8 +834,44 @@ Lowering the Bayes ceiling changes the picture. Figure~\ref{fig:scaling-hard} sh
 
 \begin{figure}[h]
     \centering
-    \includegraphics[width=0.95\textwidth]{../outputs/results/scaling_curve_hard.png}
-    \caption{Hard-difficulty scaling: F1 vs.\ total sample size. The ceiling drops to $\sim$$95\%$. Full \sys{} overtakes CatBoost-with-context at $n \approx 20{,}000$ and opens a statistically significant $0.21$ pp gap at $n = 40{,}000$.}
+    \begin{tikzpicture}
+    \begin{axis}[
+        width=0.85\textwidth,
+        height=7cm,
+        xlabel={Total samples ($n$)},
+        ylabel={F1},
+        xmode=log,
+        log basis x=10,
+        xtick={500,1000,5000,20000,40000},
+        xticklabels={500,1k,5k,20k,40k},
+        ymin=0.84, ymax=0.96,
+        grid=major,
+        grid style={dashed,gray!30},
+        legend pos=south east,
+        legend style={font=\footnotesize, cells={anchor=west}},
+        every axis plot/.append style={line width=1pt, mark size=2pt},
+    ]
+    \addplot[color=blue!70!black, mark=*] coordinates {
+        (500,0.9050) (1000,0.9100) (5000,0.9416) (20000,0.9468) (40000,0.9511)
+    };
+    \addlegendentry{Full \sys{}}
+    \addplot[color=red!80!black, mark=square*] coordinates {
+        (500,0.9150) (1000,0.9335) (5000,0.9427) (20000,0.9465) (40000,0.9490)
+    };
+    \addlegendentry{CatBoost (with context)}
+    \addplot[color=orange!80!black, mark=triangle*] coordinates {
+        (500,0.9050) (1000,0.9049) (5000,0.9241) (20000,0.9290) (40000,0.9320)
+    };
+    \addlegendentry{CatBoost (no context)}
+    \addplot[color=gray!70!black, mark=diamond*, dashed] coordinates {
+        (500,0.8495) (1000,0.8904) (5000,0.9269) (20000,0.9339) (40000,0.9383)
+    };
+    \addlegendentry{\sys{} (no context)}
+    \draw[<->, thick, green!60!black, shorten <=1pt, shorten >=1pt]
+        (axis cs:40000,0.9490) -- node[right, font=\scriptsize\bfseries, text=green!50!black] {$+0.21$ pp, $p{=}0.038$} (axis cs:40000,0.9511);
+    \end{axis}
+    \end{tikzpicture}
+    \caption{Hard-difficulty scaling: F1 vs.\ total sample size. The ceiling drops to $\sim$$95\%$. Full \sys{} overtakes CatBoost-with-context at $n \approx 20{,}000$ and opens a statistically significant $0.21$ pp gap at $n = 40{,}000$ (Welch's $t{=}2.249$, $p{=}0.0375$).}
     \label{fig:scaling-hard}
 \end{figure}
 
