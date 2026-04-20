@@ -939,7 +939,102 @@ For reference, Table~\ref{tab:scaling-full-hard} reports all ten variants at the
 Two observations from this table foreshadow Chapter~7. First, Full \sys{} is the single best variant. Second, \emph{every} model family's ``with-context'' variant beats its ``no-context'' variant, and by a margin larger than the \sys{}-vs-tree gap.
 
 % ============================================================================
-% CHAPTER 7: DISCUSSION
+% CHAPTER 7: UNIVERSAL CONTEXT CONTRIBUTION
+% ============================================================================
+\chapter{Universal Context Contribution}
+
+The scaling study in Chapter~6 confirms a neural-over-tree crossover with a small effect size. This chapter delivers the report's strongest claim: across every model family we evaluated, adding the same five-dimensional context slice produces a reproducible F1 improvement that is six-to-ten times larger than the best architectural gap.
+
+\section{Context Contribution per Model Family}
+
+At the headline scale ($n = 40{,}000$ hard samples, 10 seeds), we compare each model family's performance with and without the five context features (dimensions 12--16). The difference in F1 attributable to adding context is shown in Figure~\ref{fig:context-contribution} and Table~\ref{tab:context-contribution}.
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}
+    \begin{axis}[
+        xbar,
+        width=0.80\textwidth,
+        height=7cm,
+        xlabel={$\Delta$F1 (percentage points) from adding context},
+        symbolic y coords={RandomForest, CatBoost, XGBoost, LightGBM, CAAA},
+        ytick=data,
+        xmin=0, xmax=2.8,
+        nodes near coords,
+        nodes near coords align={horizontal},
+        every node near coord/.append style={font=\footnotesize\bfseries, xshift=2pt},
+        enlarge y limits=0.18,
+        bar width=14pt,
+        grid=major,
+        grid style={dashed, gray!30},
+    ]
+    \addplot[fill=blue!30, draw=blue!70!black] coordinates {
+        (1.28, CAAA)
+        (1.58, LightGBM)
+        (1.60, XGBoost)
+        (1.70, CatBoost)
+        (2.30, RandomForest)
+    };
+    \draw[thick, red!70!black, dashed] (axis cs:0.21, CAAA) -- (axis cs:0.21, RandomForest);
+    \node[right, font=\scriptsize, text=red!70!black] at (axis cs:0.23, LightGBM) {Neural--tree gap (0.21 pp)};
+    \end{axis}
+    \end{tikzpicture}
+    \caption{Context contribution per model family at $n = 40{,}000$ hard samples. The same five-dimensional context slice yields $+1.28$ to $+2.30$ percentage points of F1 across neural and tree architectures. The dashed red line marks the best neural-over-tree architectural gap from Chapter~6, which the context contribution exceeds by $6$--$10\times$.}
+    \label{fig:context-contribution}
+\end{figure}
+
+\begin{table}[h]
+    \centering
+    \caption{Context Contribution at 40{,}000 Hard Samples (10 seeds, mean F1)}
+    \label{tab:context-contribution}
+    \small
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Model family} & \textbf{No context} & \textbf{With context} & \textbf{$\Delta$ (pp)} \\
+        \midrule
+        \sys{} (neural, FiLM) & 0.9383 & 0.9511 & $+1.28$ \\
+        CatBoost (GBDT, ordered) & 0.9320 & 0.9490 & $+1.70$ \\
+        XGBoost (GBDT, pre-sorted) & 0.9339 & 0.9499 & $+1.60$ \\
+        LightGBM (GBDT, histogram) & 0.9342 & 0.9500 & $+1.58$ \\
+        RandomForest (bagged trees) & 0.9193 & 0.9423 & $+2.30$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Interpretation}
+
+Three properties of this pattern support a strong interpretation.
+
+\paragraph{Universality across inductive biases.} The five architectures evaluated span a wide range of inductive biases: FiLM-conditioned neural modulation, ordered-boosted GBDT with target-based categorical handling, pre-sorted GBDT with exact split finding, histogram-based GBDT with leaf-wise growth, and bagged decision trees with random feature sampling. The context gain appears in every one. A finding that reproduces across this range of architectures is unlikely to be an artifact of any single model family's behaviour.
+
+\paragraph{Magnitude relative to architectural differences.} The best neural-over-tree gap we measured (Full \sys{} vs.\ CatBoost~$+$ctx at the same scale) is $+0.21$ pp. The smallest context gain is $+1.28$ pp; the largest is $+2.30$ pp. The context contribution is $6$--$10\times$ larger than the architectural difference. In terms of scientific weight, the universal-context finding dominates the crossover finding.
+
+\paragraph{Reproducibility across seeds.} Each of the five $\Delta$ values is computed from 10 seeds with pooled standard deviations around $0.002$--$0.003$. Every family's with-context mean exceeds its no-context mean plus two standard deviations, so the sign of the effect is stable across all 50 paired runs.
+
+\section{Reframing \sys{}'s Contribution}
+
+We designed \sys{} as a context-conditioned neural architecture featuring FiLM conditioning with skeptical gating, Piecewise Linear Embeddings for axis-aligned thresholding, and a Context Consistency Loss. The architectural design is non-trivial, and the scaling study shows it produces the single best absolute F1 at $n = 40{,}000$ on the hard task. But the scientific contribution of this report is not ``CAAA is the best neural architecture for anomaly attribution''---a claim too small in effect size ($0.21$ pp over the best tree) to bear weight.
+
+The correct framing is: context integration is a general mechanism that improves every architecture class, and \sys{} is one principled way to implement it. Tree-based classifiers implement it via concatenation; \sys{} implements it via FiLM-modulated multiplicative conditioning with a confidence gate. Both paths extract the same signal from the same five features. The methodological recipe is:
+
+\begin{enumerate}
+    \item Define a small, structured context slice with clear semantics (scheduled events, deploy history, time-of-day).
+    \item Ensure independence between context-sampling and label-sampling during data generation; apply leakage controls to prevent context from becoming a label proxy (§4.4).
+    \item Evaluate with universal comparability: the same feature vector, the same splits, the same metrics across every model family.
+\end{enumerate}
+
+Following this recipe, the context contribution appears reproducibly. \sys{} demonstrates the recipe with a neural architecture. The strongest empirical claim of this report is that the recipe itself, not the architecture, is what carries the gain.
+
+\section{Two Insights from the Joint Analysis}
+
+Combining Chapters~5, 6, and 7, two findings summarize the body of evidence:
+
+\paragraph{Insight 1 (Scaling crossover).} On microservice anomaly attribution, gradient-boosted trees dominate at small sample sizes (real-data regime, $n \sim 1{,}500$) and lose their lead around $n \approx 20{,}000$ on harder tasks. The architectural advantage of a context-conditioned neural network over the strongest tree is small ($0.21$ pp F1 at $40{,}000$, $p = 0.038$) but statistically detectable. This corroborates~\cite{mcelfresh2023neural} on a new domain: neural-vs-tree crossover is real, modest, and governed by sample size and task difficulty. Real-data benchmarks at their current scale therefore underestimate neural-model capability on attribution tasks.
+
+\paragraph{Insight 2 (Universal context).} A five-dimensional structured context slice improves every model family evaluated by $+1.3$ to $+2.3$ pp of F1. The effect is six-to-ten times larger than the best architectural gap, replicates across seeds, and is robust to the choice of model family. This is the report's strongest and most generalizable finding. The practical implication for microservice observability is concrete: regardless of which model class is deployed---neural attention stack, GBDT ensemble, or RandomForest baseline---adding a well-designed context slice captures additional signal that metric-only features miss.
+
+% ============================================================================
+% CHAPTER 8: DISCUSSION
 % ============================================================================
 \chapter{Discussion and Analysis}
 
