@@ -295,7 +295,7 @@ Our methodology satisfies all three conditions. Chapter~4 documents the full gen
 
 Table~\ref{tab:gap} summarizes the landscape. Our survey reveals that \textbf{no prior work uses operational context as model features}; all operate on raw telemetry. Furthermore, no paper discusses the risk of context metadata becoming a label proxy---the shortcut learning problem is entirely absent from the AIOps literature. Equally, no prior microservice-attribution work has characterized the neural-over-tree crossover as a function of sample size. \sys{} is the first to address the context-integration gap, the methodological gap in evaluating context-aware systems, and the scaling gap simultaneously.
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Capabilities of Existing Methods vs.\ \sys{}}
     \label{tab:gap}
@@ -328,7 +328,7 @@ Table~\ref{tab:gap} summarizes the landscape. Our survey reveals that \textbf{no
 
 The core pipeline processes a 44-dimensional feature vector through three stages: (1) PLE-augmented feature encoding ($44d \rightarrow 64d$), (2) FiLM-based context integration with confidence gating, and (3) classification. The model has 19,206 trainable parameters and trains in $<$2 minutes on CPU.
 
-\begin{figure}[h]
+\begin{figure}[!htbp]
     \centering
     \resizebox{0.9\textwidth}{!}{%
     \begin{tikzpicture}[
@@ -361,7 +361,7 @@ The core pipeline processes a 44-dimensional feature vector through three stages
 
 The system extracts a 44-dimensional feature vector organized into six groups:
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Feature Vector Composition (44 dimensions)}
     \label{tab:features}
@@ -397,7 +397,7 @@ This gives the MLP axis-aligned threshold capability similar to tree splits, add
 
 The Context Integration Module uses TADAM-style FiLM conditioning~\cite{perez2018film, oreshkin2018tadam} with confidence gating (Figure~\ref{fig:context-module}).
 
-\begin{figure}[h]
+\begin{figure}[!htbp]
     \centering
     \resizebox{0.7\textwidth}{!}{%
     \begin{tikzpicture}[
@@ -574,7 +574,7 @@ These five safeguards combine to make the shortcut paths we could detect closed.
 
 The same five-dimensional context slice has identical semantics on synthetic and real data. Table~\ref{tab:context-taxonomy} summarizes the mapping.
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Context Feature Taxonomy (5 dimensions, identical schema on synthetic and real data)}
     \label{tab:context-taxonomy}
@@ -625,7 +625,7 @@ This chapter reports \sys{}'s performance on the RCAEval benchmark across all th
 
 Table~\ref{tab:real-pooled} summarizes performance macro-averaged across the nine valid system-by-dataset cells.
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Pooled RCAEval Results (Macro-Averaged Over 9 System/Dataset Cells, 10 runs)}
     \label{tab:real-pooled}
@@ -663,7 +663,7 @@ Table~\ref{tab:real-pooled} summarizes performance macro-averaged across the nin
 
 Table~\ref{tab:per-system} shows F1 across the nine system-by-dataset cells for the three headline variants.
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Per-System F1 ($\%$) Across All Dataset/System Combinations (10 seeds, mean)}
     \label{tab:per-system}
@@ -706,7 +706,7 @@ One observation worth noting within the real-data results: CatBoost with context
 
 For completeness, Table~\ref{tab:synthetic-brief} reports the ablation on the small 200-sample synthetic subset used during model development. This is the same sample regime as the real data and should not be confused with the large-scale synthetic scaling study in Chapter~6, which tests what happens when sample size grows.
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Synthetic Ablation at $n{=}200$ (10 runs, mean $\pm$ std)}
     \label{tab:synthetic-brief}
@@ -760,7 +760,7 @@ Each study evaluates ten model variants at multiple sample sizes: Full \sys{}, \
 
 Figure~\ref{fig:scaling-default} visualizes F1 as a function of sample size for the key variants under default difficulty; Table~\ref{tab:scaling-default} reports the numerical values for the head-to-head comparison.
 
-\begin{figure}[h]
+\begin{figure}[!htbp]
     \centering
     \begin{tikzpicture}
     \begin{axis}[
@@ -805,7 +805,7 @@ Figure~\ref{fig:scaling-default} visualizes F1 as a function of sample size for 
     \label{fig:scaling-default}
 \end{figure}
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Default-Difficulty Scaling: Full \sys{} vs.\ CatBoost with Context (F1, 3 seeds at all sizes except 10 seeds at 40{,}000)}
     \label{tab:scaling-default}
@@ -832,7 +832,7 @@ Both models saturate near $97\%$ F1 as $n$ grows. CatBoost leads at small-to-mod
 
 Lowering the Bayes ceiling changes the picture. Figure~\ref{fig:scaling-hard} shows the hard-difficulty scaling curves; Table~\ref{tab:scaling-hard} reports numerical values for the same head-to-head comparison.
 
-\begin{figure}[h]
+\begin{figure}[!htbp]
     \centering
     \begin{tikzpicture}
     \begin{axis}[
@@ -875,7 +875,7 @@ Lowering the Bayes ceiling changes the picture. Figure~\ref{fig:scaling-hard} sh
     \label{fig:scaling-hard}
 \end{figure}
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Hard-Difficulty Scaling: Full \sys{} vs.\ CatBoost with Context (F1, 3 seeds at all sizes except 10 seeds at 40{,}000)}
     \label{tab:scaling-hard}
@@ -913,7 +913,7 @@ The more decisive finding---delivered in Chapter~7---is that context is a univer
 
 For reference, Table~\ref{tab:scaling-full-hard} reports all ten variants at the headline scale $n = 40{,}000$ on hard difficulty, which is the dataset used in Chapter~7's universal-context analysis.
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{All Variants at 40{,}000 Hard Samples (10 seeds, mean $\pm$ std)}
     \label{tab:scaling-full-hard}
@@ -949,7 +949,7 @@ The scaling study in Chapter~6 confirms a neural-over-tree crossover with a smal
 
 At the headline scale ($n = 40{,}000$ hard samples, 10 seeds), we compare each model family's performance with and without the five context features (dimensions 12--16). The difference in F1 attributable to adding context is shown in Figure~\ref{fig:context-contribution} and Table~\ref{tab:context-contribution}.
 
-\begin{figure}[h]
+\begin{figure}[!htbp]
     \centering
     \begin{tikzpicture}
     \begin{axis}[
@@ -983,7 +983,7 @@ At the headline scale ($n = 40{,}000$ hard samples, 10 seeds), we compare each m
     \label{fig:context-contribution}
 \end{figure}
 
-\begin{table}[h]
+\begin{table}[!htbp]
     \centering
     \caption{Context Contribution at 40{,}000 Hard Samples (10 seeds, mean F1)}
     \label{tab:context-contribution}
