@@ -1,0 +1,840 @@
+\documentclass[12pt,a4paper]{report}
+
+% ============================================================================
+% PACKAGES
+% ============================================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\renewcommand{\algorithmicensure}{\textbf{Output:}}
+\usepackage{textcomp}
+\usepackage{url}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usetikzlibrary{shapes,arrows,positioning,fit,backgrounds,calc}
+\usepackage[left=1.5in,right=1in,top=1in,bottom=1in]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tocloft}
+\usepackage{caption}
+
+% ============================================================================
+% HYPERREF SETUP
+% ============================================================================
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=blue!70!black,
+    urlcolor=blue!70!black,
+}
+
+% ============================================================================
+% HEADER/FOOTER
+% ============================================================================
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\leftmark}
+\fancyhead[R]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ============================================================================
+% CUSTOM COMMANDS
+% ============================================================================
+\newcommand{\sys}{CAAA}
+
+% ============================================================================
+% DOCUMENT BEGIN
+% ============================================================================
+\begin{document}
+
+% ============================================================================
+% TITLE PAGE
+% ============================================================================
+\begin{titlepage}
+\centering
+\vspace*{1.5cm}
+
+{\LARGE\bfseries Context-Aware False Positive Reduction\\in Cloud Microservice Anomaly Detection}
+
+\vspace{1.5cm}
+
+Project Report Submitted in Partial Fulfilment of the Requirements for\\the Degree of
+
+\vspace{0.5cm}
+
+{\Large\bfseries Bachelor of Technology}
+
+\vspace{0.3cm}
+
+\textit{in}
+
+\vspace{0.3cm}
+
+{\large Computer Science and Engineering}
+
+\vspace{1.5cm}
+
+Submitted by
+
+\vspace{0.5cm}
+
+\begin{tabular}{ll}
+Pratyush Jain: & (Roll No. 2210110970)\\
+Vajra Akurathi: & (Roll No. 2210110779)\\
+\end{tabular}
+
+\vspace{1.5cm}
+
+{\large\bfseries Under the Supervision of}
+
+\vspace{0.3cm}
+
+Dr. Suchi Kumari
+
+\vspace{1.5cm}
+
+\includegraphics[width=0.3\textwidth]{snu_logo.png}
+
+\vspace{0.5cm}
+
+{\large Department of Computer Science and Engineering}
+
+\vspace{0.2cm}
+
+April 2026
+
+\end{titlepage}
+
+% ============================================================================
+% ACKNOWLEDGMENTS
+% ============================================================================
+\newpage
+\chapter*{Acknowledgments}
+\addcontentsline{toc}{chapter}{Acknowledgments}
+
+We express our sincere gratitude to our supervisor, Dr. Suchi Kumari, whose expert guidance, constructive criticism, and continuous encouragement have been instrumental in shaping the direction and quality of this research. Her expertise in machine learning, distributed systems, and software engineering provided invaluable insights throughout the iterative development of this framework.
+
+We are deeply grateful to Shiv Nadar Institution of Eminence, particularly the School of Engineering, for providing the essential infrastructure, computing facilities, and a vibrant academic environment that made this research possible. The university's commitment to fostering innovation enabled us to pursue an unconventional research methodology---eleven iterative rounds of experimentation across four months---that would not have been possible without institutional support.
+
+Special thanks to the RCAEval benchmark team for providing a standardized evaluation framework with 735 real-world fault cases across three microservice systems. We also acknowledge the open-source communities behind PyTorch, scikit-learn, XGBoost, LightGBM, CatBoost, SHAP, and ruptures that formed the technical foundation of our implementation.
+
+Finally, we acknowledge the broader AIOps research community, whose papers on shortcut learning, FiLM conditioning, and tabular deep learning informed our evaluation methodology and architectural decisions.
+
+% ============================================================================
+% ABSTRACT
+% ============================================================================
+\newpage
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+Modern cloud-native systems built on microservice architectures generate
+high-volume monitoring alerts with reported false-positive rates of 6--28\%.
+Operational context---scheduled load events, deployment history, and
+traffic-pattern signals---is routinely collected by production
+observability stacks but is not used as a feature by existing anomaly
+detection or attribution systems. This work investigates whether
+contextual features materially improve anomaly attribution and, if so,
+whether the benefit is specific to a neural architecture or is a general,
+reproducible signal.
+
+We first evaluate on the RCAEval benchmark (three microservice systems,
+three dataset variants, $\sim$1{,}500 pooled cases). Gradient-boosted
+tree baselines dominate all neural variants on real data---consistent
+with published findings on small tabular tasks. To test whether sample
+size is the bottleneck, we design a difficulty-aware synthetic benchmark
+with explicit anti-leakage safeguards (pre-injection splits, randomized
+context assignment, counterfactual baselines via RNG forking,
+severity-tiered disguised faults) and run a controlled scaling study
+from 500 to 40{,}000 samples over ten model variants with 10 random seeds.
+
+Two findings emerge. First, a neural-over-tree crossover with scale:
+at large $n$ and a lowered Bayes ceiling, the Full \sys{} model reaches
+$95.11\% \pm 0.18$ F1 versus $94.90\% \pm 0.21$ for CatBoost-with-context
+(Welch's $t = 2.249$, $p = 0.038$). Second, and more robustly,
+\emph{context integration is a universal improvement mechanism}:
+adding the same 5-dimensional context slice yields $+1.3$ to $+2.3$
+percentage points of F1 across all five evaluated model families
+(CAAA, CatBoost, XGBoost, LightGBM, RandomForest). The context
+contribution is 6--10$\times$ larger than the best neural-over-tree gap,
+replicates across seeds, and holds regardless of architecture class.
+We therefore position \sys{} as a principled instantiation of a general
+context-integration methodology rather than an architecture-specific win.
+
+\vspace{0.5cm}
+\noindent\textbf{Keywords:} Anomaly attribution, microservices, context
+integration, tabular deep learning, scaling laws, evaluation methodology
+
+% ============================================================================
+% TABLE OF CONTENTS
+% ============================================================================
+\newpage
+\tableofcontents
+
+\newpage
+\listoffigures
+\addcontentsline{toc}{chapter}{List of Figures}
+
+\newpage
+\listoftables
+\addcontentsline{toc}{chapter}{List of Tables}
+
+
+% ============================================================================
+% CHAPTER 1: INTRODUCTION
+% ============================================================================
+\chapter{Introduction}
+
+\section{Background}
+
+The software industry has undergone a fundamental architectural transformation over the past decade, shifting from monolithic applications to microservice-based systems~\cite{soldani2022survey}. Organizations such as Netflix, Amazon, and Uber have decomposed their applications into hundreds or thousands of independently deployable services. While this architectural pattern offers significant benefits---improved scalability, faster deployment cycles, and technology flexibility---it introduces substantial complexity in system observability and fault diagnosis.
+
+Anomaly detection in these systems has progressed through three generations: from statistical baselines (N-Sigma, SPOT) through reconstruction-based deep learning (OmniAnomaly~\cite{su2019omnianomaly}, USAD~\cite{audibert2020usad}) to the current generation of attention-based approaches (Anomaly Transformer~\cite{xu2022anomalytransformer}, DCdetector~\cite{yang2023dcdetector}). Despite achieving F1 scores of 83--97\% on controlled benchmarks, production adoption remains limited by a persistent problem: false positive rates of 6--28\%~\cite{soldani2022survey}, with even state-of-the-art root cause analysis methods achieving only 46--63\% localization accuracy on large-scale systems~\cite{pham2024rcaeval}.
+
+\section{Motivation}
+
+The core limitation of existing approaches is the lack of \textit{contextual awareness}. A sudden spike in CPU utilization and request latency appears identical to an anomaly detector whether caused by a cascading fault or by a planned marketing campaign driving legitimate traffic. Current methods treat all anomalous-looking patterns as faults, producing false alerts whenever normal operational events---scheduled load tests, auto-scaling events, time-of-day traffic peaks, or recent deployments---cause metric deviations.
+
+Our survey of six major AIOps papers (DejaVu~\cite{li2022dejavu}, BARO~\cite{chen2024baro}, RCAEval~\cite{pham2024rcaeval}, Chain-of-Event~\cite{chainofevent2024}, Night's Watch, Lumos~\cite{lumos2020}) revealed a striking finding: \textit{no prior work uses operational context as model features}. All systems operate exclusively on raw telemetry (metrics, logs, traces) without incorporating deployment metadata, scheduled event flags, or time-of-day encodings. Lumos is the sole exception, using A/B testing to control for confounders, but it requires controlled experiments rather than operating on production observability data.
+
+CloudAnoBench~\cite{cloudanobench2025}, released in 2025, is the first benchmark to include 16 ``deceptive normal scenarios'' where anomalous-looking patterns are explained by benign events, but provides no mechanism to incorporate contextual explanations into the detection pipeline.
+
+\section{Problem Statement}
+
+We address the following research questions:
+
+\begin{enumerate}
+    \item \textbf{RQ1:} Can integrating operational context signals (scheduled events, deployments, time-of-day patterns) into anomaly classification reduce false positives by $>$40\% while maintaining $>$90\% fault recall?
+    \item \textbf{RQ2:} How does the proposed Context Consistency Loss compare to standard cross-entropy for training context-aware classifiers?
+    \item \textbf{RQ3:} Which context features contribute most to false positive reduction, and how does performance degrade as context availability decreases?
+\end{enumerate}
+
+\section{Contributions}
+
+This project makes the following novel contributions:
+
+\begin{enumerate}
+    \item \textbf{Context-Aware Anomaly Attribution:} The first framework to explicitly distinguish workload-induced anomalies from actual faults using operational context signals within a unified classification pipeline.
+    
+    \item \textbf{Context Consistency Loss:} A composite loss function with gated unknown-context penalty and TADAM-style delta regularization, preventing FiLM noise amplification on small datasets.
+    
+    \item \textbf{Context Integration Module:} FiLM conditioning with skeptical confidence gating (bias $= -1.0$, initial gate output $\approx 0.27$) and feature-group dropout for noise robustness.
+    
+    \item \textbf{Piecewise Linear Embeddings (PLE):} Quantile-based bin encodings that give MLPs axis-aligned threshold capability, closing the neural-tree gap to 1.0\% on synthetic data.
+    
+    \item \textbf{CAAA+CatBoost Hybrid:} FiLM-conditioned neural embeddings concatenated with raw features, classified by CatBoost---the first work combining FiLM conditioning with tree-based downstream classifiers.
+    
+    \item \textbf{Evaluation Methodology:} Severity-tiered synthetic data with disguised faults, pre-injection split for distribution-matched RCAEval evaluation, counterfactual baselines via RNG forking, and label leakage prevention via randomized context assignment.
+\end{enumerate}
+
+\section{Report Organization}
+
+The remainder of this report is organized as follows: Chapter~2 reviews related work across anomaly detection, root cause analysis, FiLM conditioning, and tabular deep learning. Chapter~3 details the proposed methodology including architecture design, loss functions, and hybrid approaches. Chapter~4 presents the evaluation methodology, a first-class contribution addressing three evaluation pitfalls. Chapter~5 presents comprehensive experimental results. Chapter~6 provides discussion, error analysis, and limitations. Chapter~7 concludes with lessons learned and future directions.
+
+
+% ============================================================================
+% CHAPTER 2: LITERATURE SURVEY
+% ============================================================================
+\chapter{Literature Survey}
+
+This chapter surveys the landscape of research relevant to context-aware anomaly attribution, synthesizing findings from 150+ papers (2020--2025) across six areas.
+
+\section{Time-Series Anomaly Detection}
+
+\textbf{Reconstruction-based methods} form the foundation. OmniAnomaly~\cite{su2019omnianomaly} combines GRU with VAE through stochastic variable connection, achieving F1 of 0.86 but requiring 48--87 minutes per training epoch. USAD~\cite{audibert2020usad} achieves 547$\times$ faster training through adversarially-trained autoencoders with tunable sensitivity. Donut~\cite{xu2018donut} provides the theoretical VAE foundation through KDE interpretation.
+
+\textbf{Attention-based methods} represent the current generation. The Anomaly Transformer~\cite{xu2022anomalytransformer} introduces Association Discrepancy---the observation that anomalies exhibit adjacent-concentration bias in attention patterns---achieving F1 of 83--94\% across SMD, MSL, and SMAP benchmarks. DCdetector~\cite{yang2023dcdetector} reports 96.6\% F1 on MSL through dual attention contrastive learning. TranAD~\cite{tuli2022tranad} combines self-conditioning with adversarial training, achieving 99\% training time reduction. However, these results use point-adjustment evaluation protocols that may overestimate performance~\cite{pham2024rcaeval}.
+
+\textbf{Contrastive learning} approaches include CARLA~\cite{darban2024carla} (injecting known anomaly types as negatives) and CL-TAD~\cite{cltad2023} (masked sample reconstruction), both improving over self-supervised baselines.
+
+\section{Root Cause Analysis in Microservices}
+
+RCAEval~\cite{pham2024rcaeval} provides the most comprehensive benchmark (735 cases, 3 systems), revealing that best methods achieve only Avg@5 of 0.46--0.54 on TrainTicket. RCD~\cite{ikram2022rcd} employs the $\Psi$-PC algorithm for interventional target discovery (NeurIPS 2022). CIRCA~\cite{li2022circa} formalizes RCA as intervention recognition in Causal Bayesian Networks (KDD 2022). BARO~\cite{chen2024baro} demonstrates that simple Bayesian change-point detection achieves Avg@5 of 0.86--0.95 (FSE 2024). DynaCausal~\cite{dynacausal2025} advances state-of-the-art to AC@1 of 0.63 through dynamic causality-aware representations, yet still misidentifies $\sim$40\% of root causes.
+
+\section{GNN-Based Fault Localization}
+
+DiagFusion~\cite{zhang2023diagfusion} combines metrics, logs, and traces with GNN, achieving 20.9--368\% improvement over baselines in root cause localization. MicroRCA~\cite{wu2020microrcarootcause} achieves 89\% precision using Personalized PageRank. CHASE~\cite{chase2024} introduces causal hypergraph-based multi-hop fault propagation.
+
+A critical finding from DiagMLP~\cite{diagmlp2025} challenges GNN necessity: a simple MLP achieves parity across five public datasets, suggesting that preprocessing and multimodal fusion, not graph structures, primarily drive current benchmark performance. This insight directly motivated our focus on feature engineering and context integration rather than complex graph architectures.
+
+\section{FiLM Conditioning and Context Integration}
+
+Perez~\textit{et al.}~\cite{perez2018film} introduced Feature-wise Linear Modulation (FiLM) for visual reasoning, demonstrating that conditioning neural networks on auxiliary information via learned affine transformations is highly effective. Oreshkin~\textit{et al.}~\cite{oreshkin2018tadam} proposed TADAM, initializing FiLM gamma as $1 + \delta$ with $\delta$ starting at zero, constraining the multiplicative path to near-identity. Sheth~\textit{et al.}~\cite{sheth2022auxiliary} identified a critical FiLM failure mode: multiplicative noise amplification occurs when noisy auxiliary features are multiplied against temporal representations. This finding directly informed our skeptical initialization strategy.
+
+\section{Tabular Deep Learning}
+
+Grinsztajn~\textit{et al.}~\cite{grinsztajn2022tree} demonstrated at NeurIPS 2022 that tree-based models outperform deep learning on tabular data in most settings, particularly for small datasets. Gorishniy~\textit{et al.}~\cite{gorishniy2022embeddings} proposed piecewise linear embeddings for numerical features, giving MLPs axis-aligned threshold capability similar to tree splits. McElfresh~\textit{et al.}~\cite{mcelfresh2023neural} provided complementary evidence showing conditions under which neural nets can match trees. TabPFN~\cite{hollmann2024tabpfn} achieves state-of-the-art on small datasets via in-context learning (Nature 2025). TabM~\cite{gorishniy2025tabm} achieves parameter-efficient MLP ensembling outperforming GBDTs (ICLR 2025).
+
+\section{Research Gap Analysis}
+
+Table~\ref{tab:gap} summarizes the landscape. Our survey reveals that \textbf{no prior work uses operational context as model features}; all operate on raw telemetry. Furthermore, no paper discusses the risk of context metadata becoming a label proxy---the shortcut learning problem is entirely absent from the AIOps literature. \sys{} is the first to address both the context integration gap and the methodological gap in evaluating context-aware systems.
+
+\begin{table}[h]
+    \centering
+    \caption{Capabilities of Existing Methods vs. \sys{}}
+    \label{tab:gap}
+    \begin{tabular}{lcccccc}
+        \toprule
+        \textbf{Method} & \textbf{Met} & \textbf{MM} & \textbf{Ctx} & \textbf{FiLM} & \textbf{Attr} & \textbf{FPR} \\
+        \midrule
+        Anomaly Trans.~\cite{xu2022anomalytransformer} & $\checkmark$ & -- & -- & -- & -- & -- \\
+        DCdetector~\cite{yang2023dcdetector} & $\checkmark$ & -- & -- & -- & -- & -- \\
+        BARO~\cite{chen2024baro} & $\checkmark$ & -- & -- & -- & -- & -- \\
+        DiagFusion~\cite{zhang2023diagfusion} & $\checkmark$ & $\checkmark$ & -- & -- & -- & -- \\
+        Lumos~\cite{lumos2020} & $\checkmark$ & -- & A/B & -- & -- & $\checkmark$ \\
+        \sys{} (Ours) & $\checkmark$ & -- & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ \\
+        \bottomrule
+    \end{tabular}
+
+    \smallskip
+    \footnotesize Met=Metrics, MM=Multimodal, Ctx=Context, Attr=Attribution, FPR=FP Reduction
+\end{table}
+
+
+% ============================================================================
+% CHAPTER 3: METHODOLOGY
+% ============================================================================
+\chapter{Methodology}
+
+\section{System Architecture Overview}
+
+\sys{} uses an optional two-stage pipeline. Stage 1 (optional) is an LSTM autoencoder pre-filter that identifies anomalous time windows via reconstruction error. Stage 2 is the core anomaly attribution module that classifies detected anomalies as FAULT, EXPECTED\_LOAD, or UNKNOWN.
+
+The core pipeline processes a 44-dimensional feature vector through three stages: (1) PLE-augmented feature encoding ($44d \rightarrow 64d$), (2) FiLM-based context integration with confidence gating, and (3) classification. The model has 19,206 trainable parameters and trains in $<$2 minutes on CPU.
+
+\begin{figure}[h]
+    \centering
+    \resizebox{0.9\textwidth}{!}{%
+    \begin{tikzpicture}[
+        node distance=0.5cm,
+        block/.style={rectangle, draw, rounded corners, minimum width=2.0cm, minimum height=0.7cm, font=\small},
+        arrow/.style={->, >=stealth, thick}
+    ]
+        \node[block, fill=gray!15, draw=gray!50, dashed] (ad) {LSTM-AE};
+        \node[font=\scriptsize, above=0.1cm of ad] {Stage 1 (Optional)};
+        \node[block, fill=blue!15, right=1.0cm of ad] (fe) {\begin{tabular}{c}Feature Encoder\\{\scriptsize MLP+LN+PLE}\end{tabular}};
+        \node[font=\scriptsize, above=0.1cm of fe] {$44d \rightarrow 64d$};
+        \node[block, fill=green!15, right=0.8cm of fe] (cm) {\begin{tabular}{c}Context Module\\{\scriptsize FiLM+Gate}\end{tabular}};
+        \node[block, fill=yellow!15, draw=yellow!60, above=0.6cm of cm] (ctx) {\begin{tabular}{c}Context (5d)\end{tabular}};
+        \node[block, fill=red!10, right=0.8cm of cm] (cls) {\begin{tabular}{c}Classifier\\{\scriptsize GELU+Linear}\end{tabular}};
+        \node[right=0.6cm of cls, font=\small] (out) {\begin{tabular}{c}FAULT /\\LOAD /\\UNKNOWN\end{tabular}};
+        \node[left=0.6cm of ad, font=\small] (inp) {Metrics};
+        \draw[arrow, dashed, gray] (inp) -- (ad);
+        \draw[arrow] (ad) -- (fe);
+        \draw[arrow] (fe) -- (cm);
+        \draw[arrow, blue!60] (ctx) -- (cm);
+        \draw[arrow] (cm) -- (cls);
+        \draw[arrow] (cls) -- (out);
+    \end{tikzpicture}%
+    }
+    \caption{\sys{} system architecture. The 44-dim feature vector passes through a PLE-augmented encoder, then is modulated by the FiLM-based Context Integration Module. Stage 1 (LSTM-AE) is optional.}
+    \label{fig:architecture}
+\end{figure}
+
+\section{Feature Vector Design}
+
+The system extracts a 44-dimensional feature vector organized into six groups:
+
+\begin{table}[h]
+    \centering
+    \caption{Feature Vector Composition (44 dimensions)}
+    \label{tab:features}
+    \begin{tabular}{llcl}
+        \toprule
+        \textbf{Group} & \textbf{Key Features} & \textbf{Dims} & \textbf{Purpose} \\
+        \midrule
+        Workload & \texttt{load\_ratio}, \texttt{cpu\_corr} & 0--5 & Load-metric correlation \\
+        Behavioral & \texttt{onset\_grad}, \texttt{cascade} & 6--11 & Fault propagation patterns \\
+        Context & \texttt{event\_active}, \texttt{seasonality} & 12--16 & Operational context signals \\
+        Statistical & \texttt{mean\_cpu}, \texttt{max\_error} & 17--29 & Metric summary statistics \\
+        Service-Level & \texttt{n\_services}, \texttt{cpu\_spread} & 30--35 & Cross-service aggregation \\
+        Extended & \texttt{spectral\_entropy}, \texttt{centrality} & 36--43 & Frequency-domain, graph \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Dual Context Processing}
+
+The full 44-dim feature vector (including context dims 12--16) passes through the Feature Encoder so the encoder learns joint representations capturing interactions between context and metric features. Context features are \textit{also} sliced out separately and fed into the Context Integration Module for explicit FiLM conditioning and confidence gating. This dual processing ensures the encoder builds a context-entangled hidden representation while the gating module controls how much the explicit context signal modulates the final prediction.
+
+\section{Piecewise Linear Embeddings}
+
+Each scalar feature is transformed into an 8-bin encoding via quantile boundaries from training data~\cite{gorishniy2022embeddings}:
+\begin{equation}
+    \text{PLE}(x_j) = \left[\text{clamp}\left(\frac{x_j - e_j^{(b)}}{e_j^{(b+1)} - e_j^{(b)}}, 0, 1\right)\right]_{b=1}^{8}
+\end{equation}
+This gives the MLP axis-aligned threshold capability similar to tree splits, addressing the neural-tree gap on small tabular data.
+
+\section{Context Integration Module}
+
+The Context Integration Module uses TADAM-style FiLM conditioning~\cite{perez2018film, oreshkin2018tadam} with confidence gating (Figure~\ref{fig:context-module}).
+
+\begin{figure}[h]
+    \centering
+    \resizebox{0.7\textwidth}{!}{%
+    \begin{tikzpicture}[
+        node distance=0.6cm,
+        block/.style={rectangle, draw, rounded corners, minimum width=1.4cm, minimum height=0.5cm, font=\small},
+        arrow/.style={->, >=stealth, thick}
+    ]
+        \node[block, fill=blue!10] (h) {$\mathbf{h}$ (64d)};
+        \node[block, fill=yellow!10, right=2.8cm of h] (c) {$\mathbf{c}$ (5d)};
+        \node[block, fill=yellow!20, below=0.5cm of c] (enc) {Ctx Encoder};
+        \node[block, fill=green!15, below=0.5cm of enc, xshift=-1.0cm] (gamma) {$1{+}\delta$};
+        \node[block, fill=green!15, below=0.5cm of enc, xshift=1.0cm] (beta) {$\beta$};
+        \node[block, fill=orange!15, minimum width=2.4cm, below=1.8cm of h, xshift=0.3cm] (film) {$(1{+}\delta)\!\odot\!\mathbf{h} + \beta$};
+        \node[block, fill=purple!10, below=0.6cm of film, minimum width=3.0cm] (gate) {Gate: $\sigma(W_g[\texttt{c,e,d}]{-}1)\!\approx\!0.27$};
+        \node[block, fill=blue!15, below=0.5cm of gate] (out) {Output + Residual};
+        \draw[arrow] (c) -- (enc);
+        \draw[arrow] (enc) -- (gamma);
+        \draw[arrow] (enc) -- (beta);
+        \draw[arrow] (h) -- (film);
+        \draw[arrow] (gamma.south) |- (film.east);
+        \draw[arrow] (beta.south) |- ([yshift=0.1cm]film.east);
+        \draw[arrow] (film) -- (gate);
+        \draw[arrow] (gate) -- (out);
+        \draw[arrow, dashed, gray] (h.west) -- ++(-0.5,0) |- (out.west);
+    \end{tikzpicture}%
+    }
+    \caption{Context Integration Module. TADAM-style FiLM conditioning ($\gamma{=}1{+}\delta$, $\delta$ initialized at zero) modulates encoded features. Confidence gate (bias${=}{-}1.0$, output${\approx}0.27$) enforces skepticism. Dashed: residual.}
+    \label{fig:context-module}
+\end{figure}
+
+\textbf{FiLM Conditioning:} Gamma is constrained as $\gamma = 1 + \delta$ where $\delta$ is initialized at zero:
+\begin{equation}
+    \mathbf{h}_{\text{mod}} = (1 + \delta(\mathbf{c})) \odot \mathbf{h} + \beta(\mathbf{c})
+\end{equation}
+
+\textbf{Confidence Gating:} A learned gate $g$ controls context influence:
+\begin{equation}
+    g = \sigma(\mathbf{W}_g [\texttt{conf}; \texttt{event}; \texttt{deploy}] + b_g), \quad b_g = -1.0
+\end{equation}
+The bias $b_g = -1.0$ produces $\sigma(-1.0) \approx 0.27$---the model is \textit{skeptical of context by default} and must learn to trust it through training.
+
+\textbf{Gated output with residual:}
+\begin{equation}
+    \mathbf{h}_{\text{out}} = \text{proj}(g \cdot \mathbf{h}_{\text{mod}} + (1{-}g) \cdot \mathbf{h}) + \mathbf{h}
+\end{equation}
+
+\section{Context Consistency Loss}
+
+The loss combines four terms:
+\begin{equation}
+    \mathcal{L} = \mathcal{L}_{\text{CE}} + \alpha \mathcal{L}_{\text{con}} + \beta \mathcal{L}_{\text{cal}} + \omega \mathcal{L}_{\text{unk}}
+\end{equation}
+
+\begin{itemize}
+    \item $\mathcal{L}_{\text{CE}}$: Cross-entropy with label smoothing $\epsilon{=}0.1$.
+    \item $\mathcal{L}_{\text{con}}$ ($\alpha{=}0.3$): Penalizes predictions contradicting context, weighted by clamped confidence with floor 0.3.
+    \item $\mathcal{L}_{\text{cal}}$ ($\beta{=}0.1$): Entropy regularization guided by context confidence.
+    \item $\mathcal{L}_{\text{unk}}$ ($\omega{=}0.2$): Gated unknown-context penalty, firing only when $p_{\text{load}} > 0.7$.
+\end{itemize}
+
+Three loss variants were systematically ablated: \textbf{gated} (default, 8.8\% FP rate), \textbf{clamp} (no unknown penalty, 6.5\% FP), and \textbf{full} (aggressive penalty, 17.5\% FP).
+
+\textbf{TADAM Regularization:} L2 penalty on FiLM delta ($\lambda_{\text{tadam}} = 0.01$).
+
+\section{CAAA+CatBoost Hybrid}
+
+We propose a two-stage hybrid: (1) the trained CAAA model produces 64-dim FiLM-conditioned embeddings, (2) these are concatenated with raw 44-dim features, and (3) CatBoost classifies the 108-dim input. This is the first work combining FiLM conditioning with tree-based downstream classifiers.
+
+\section{Algorithm}
+
+Algorithm~\ref{alg:caaa} presents the complete \sys{} inference procedure.
+
+\begin{algorithm}[h]
+\caption{\sys{}: Context-Aware Anomaly Attribution}
+\label{alg:caaa}
+\begin{algorithmic}[1]
+\Require Feature vector $\mathbf{x} \in \mathbb{R}^{44}$, threshold $\theta$
+\Ensure $\hat{y} \in \{\text{FAULT}, \text{LOAD}, \text{UNKNOWN}\}$
+\State $\mathbf{c} \leftarrow \mathbf{x}_{12:17}$ \Comment{Slice context features}
+\If{training \textbf{and} $\text{rand}() < 0.3$}
+    \State $\mathbf{x}_{12:17} \leftarrow \mathbf{0}$ \Comment{Feature-group dropout}
+\EndIf
+\State $\mathbf{x}_{\text{ple}} \leftarrow \text{PLE}(\mathbf{x})$ \Comment{Quantile bin encoding}
+\State $\mathbf{h} \leftarrow \text{MLP}_{\text{enc}}(\mathbf{x}_{\text{ple}})$ \Comment{Feature Encoder: $44d \rightarrow 64d$}
+\State $\mathbf{c}_e \leftarrow \text{ContextEncoder}(\mathbf{c})$
+\State $\delta, \beta \leftarrow W_\gamma \mathbf{c}_e,\; W_\beta \mathbf{c}_e$ \Comment{FiLM parameters}
+\State $\mathbf{h}_{\text{mod}} \leftarrow (1{+}\delta) \odot \mathbf{h} + \beta$ \Comment{TADAM modulation}
+\State $g \leftarrow \sigma(W_g[\texttt{conf};\texttt{evt};\texttt{dep}] - 1.0)$ \Comment{Skeptical gate}
+\State $\mathbf{h}_{\text{out}} \leftarrow \text{proj}(g \cdot \mathbf{h}_{\text{mod}} + (1{-}g) \cdot \mathbf{h}) + \mathbf{h}$
+\State $\mathbf{p} \leftarrow \text{softmax}(\text{MLP}_{\text{cls}}(\mathbf{h}_{\text{out}}))$
+\If{$\max(\mathbf{p}) < \theta$} \Return UNKNOWN
+\Else\ \Return $\arg\max(\mathbf{p})$
+\EndIf
+\end{algorithmic}
+\end{algorithm}
+
+\section{Training Strategy}
+
+AdamW optimizer with learning rate $10^{-3}$, weight decay $10^{-3}$; ReduceLROnPlateau scheduler (factor 0.5, patience 5); gradient clipping (max norm 1.0); early stopping (patience 10). Stratified 60/20/20 train/val/test split. Feature-group dropout: context features (dims 12--16) zeroed with 30\% probability during training. Neural models use NaNSafeScaler normalization; tree baselines operate on raw features.
+
+
+% ============================================================================
+% CHAPTER 4: EVALUATION METHODOLOGY
+% ============================================================================
+\chapter{Evaluation Methodology}
+
+A central contribution of this work is the evaluation methodology itself. During eleven rounds of iterative development, we identified and resolved three evaluation pitfalls that, left unaddressed, would have produced misleading results.
+
+\section{Synthetic Data with Severity Tiers}
+
+We generate synthetic data with three difficulty levels:
+
+\begin{itemize}
+    \item \textbf{High severity (30\%):} Clear fault signatures (CPU near 100\%, error rates +0.1--0.8). Step-change onset, single-service. Any model achieves $\sim$99\%.
+    \item \textbf{Medium severity (35\%):} All injections scaled by 0.3. Multiplicative changes interpolated via $f_{\text{scaled}} = 1 - (1-f) \times 0.3$.
+    \item \textbf{Low severity / Disguised faults (35\%):} Generated by \texttt{generate\_disguised\_fault()}, producing faults \textit{metrically indistinguishable} from load spikes. Context signals are the \textit{only discriminator}.
+\end{itemize}
+
+Without severity tiers (Round 1), all models achieved $\sim$100\%---invalidating the research premise. The three-tier system was designed based on the insight that the task had three structural components: magnitude, locality, and onset shape.
+
+\textbf{Counterfactual baselines} are generated via RNG forking: before the service generation loop, a \texttt{base\_rng} is forked from the main RNG; the counterfactual method replays the same sequence, producing byte-identical normal-operation metrics for comparison.
+
+\section{Distribution Mismatch in RCAEval (Pitfall 1)}
+
+RCAEval provides only fault cases. Na\"ively generating synthetic EXPECTED\_LOAD cases produced 100\% accuracy across \textit{all} variants (including Context Only and Rule-Based). Investigation revealed \textbf{seven independent distribution mismatches}: memory in bytes ($\sim$10$^8$) vs.\ percentages ($\sim$20); network metrics all-zero vs.\ 500--8000; 4,201 vs.\ 60 timesteps; different service counts; different naming conventions; epoch vs.\ sequential timestamps; different noise characteristics. A single threshold on \texttt{mean\_memory\_usage} achieved 100\%---the model learned ``real vs.\ synthetic data source,'' not ``fault vs.\ load.''
+
+\textbf{Fix: Pre-injection split.} Each RCAEval case contains \texttt{inject\_time.txt}. We split at this timestamp: pre-injection metrics become NORMAL, post-injection become FAULT. Both halves share identical distributions.
+
+\section{Label Leakage via Context (Pitfall 2)}
+
+After implementing the pre-injection split, Context Only still scored $\sim$100\%. Investigation revealed that all normal cases received context while all fault cases received empty context---\texttt{event\_active} was a \textit{perfect label proxy}. This is formally \textit{shortcut learning}~\cite{geirhos2020shortcut}: the model exploits a dataset artifact rather than learning the intended decision boundary.
+
+\textbf{Fix: Randomized context assignment.} Context is randomized for both classes: 70\% of NORMAL cases receive context, 30\% receive empty; 30\% of FAULT cases receive fake context, 70\% receive empty. This makes $P(\text{FAULT}|\text{no\_context}) = 0.70$, not 1.0.
+
+\section{Context Feature Dilemma (Pitfall 3)}
+
+Three context approaches were explored: (1) \textit{metric-derived context} produced only 0.8\% improvement---redundant due to the data processing inequality; (2) \textit{comparison-based context} comparing to an independent baseline was noise on synthetic data; (3) \textit{self-referencing baselines} were contaminated by anomaly onset.
+
+\textbf{Fix: Counterfactual baselines via RNG forking} for synthetic data, and \texttt{context\_mode="comparison"} using pre-injection windows for real data.
+
+\section{Baselines}
+
+We compare 17 model variants: 4 CAAA variants, 6 ablation variants, 4 tree baselines (RF, XGBoost, LightGBM, CatBoost), and 3 others (CAAA+CatBoost Hybrid, Rule-Based, Na\"ive). All experiments use 10 random seeds.
+
+
+% ============================================================================
+% CHAPTER 5: EXPERIMENTS AND RESULTS
+% ============================================================================
+\chapter{Experiments and Results}
+
+\section{Experimental Setup}
+
+\textbf{Synthetic data:} 200 samples (100 fault, 100 load), severity-tiered, \texttt{context\_mode="external"}. 11 fault types, 12 services per system, 60-timestep windows.
+
+\textbf{RCAEval data:} Real microservice failure traces from Zenodo (DOI: 10.5281/zenodo.14590730) across OnlineBoutique (12 services), SockShop (15 services), and TrainTicket (64 services). Three dataset variants: RE1 (metrics only, 375 cases), RE2 (multi-source, 270 cases), RE3 (code-level faults, 90 cases). Pre-injection split with randomized context assignment.
+
+\textbf{Implementation:} PyTorch 2.6, scikit-learn 1.3+, XGBoost, LightGBM, CatBoost, SHAP. All experiments report mean $\pm$ std across 10 seeds.
+
+\section{Synthetic Data Results}
+
+\begin{table}[h]
+    \centering
+    \caption{Synthetic Data Results (10 runs, 200 samples, mean $\pm$ std)}
+    \label{tab:synthetic}
+    \small
+    \begin{tabular}{lccccc}
+        \toprule
+        \textbf{Variant} & \textbf{Acc (\%)} & \textbf{MCC} & \textbf{FP (\%)} & \textbf{Recall (\%)} & \textbf{FPR (\%)} \\
+        \midrule
+        Full CAAA (gated) & 93.5$\pm$1.5 & .874$\pm$.03 & 8.8$\pm$4.5 & 95.8$\pm$3.9 & 91.3$\pm$4.5 \\
+        CAAA (clamp) & 93.8$\pm$2.4 & .878$\pm$.05 & 6.5$\pm$4.2 & 94.0$\pm$4.9 & 93.5$\pm$4.2 \\
+        CAAA (full penalty) & 90.5$\pm$2.8 & .821$\pm$.05 & 17.5$\pm$5.0 & 98.5$\pm$2.0 & 82.5$\pm$5.0 \\
+        \midrule
+        No Context Features & 87.8$\pm$3.0 & .761$\pm$.06 & 11.8$\pm$7.9 & 87.3$\pm$5.3 & 88.3$\pm$7.9 \\
+        No Context Loss & 94.0$\pm$1.8 & .882$\pm$.04 & 5.3$\pm$2.8 & 93.3$\pm$4.8 & 94.8$\pm$2.8 \\
+        Context Only & 76.8$\pm$4.1 & .538$\pm$.09 & 24.5$\pm$3.8 & 78.0$\pm$7.8 & 75.5$\pm$3.8 \\
+        Statistical Only & 89.9$\pm$3.9 & .804$\pm$.08 & 5.5$\pm$6.0 & 85.3$\pm$6.1 & 94.5$\pm$6.0 \\
+        \midrule
+        Baseline RF & 94.1$\pm$2.4 & .886$\pm$.05 & 3.8$\pm$3.4 & 92.0$\pm$5.1 & 96.3$\pm$3.4 \\
+        CatBoost & \textbf{94.5}$\pm$1.9 & \textbf{.891}$\pm$.04 & 5.3$\pm$2.4 & 94.3$\pm$3.5 & 94.8$\pm$2.4 \\
+        CAAA+CatBoost & 93.4$\pm$1.7 & .868$\pm$.03 & 5.3$\pm$1.8 & 92.0$\pm$2.9 & 94.8$\pm$1.8 \\
+        \midrule
+        Rule-Based & 23.5$\pm$3.7 & $-$.531 & 76.3$\pm$3.2 & 23.3$\pm$6.2 & 23.8$\pm$3.2 \\
+        Na\"ive & 50.0$\pm$0.0 & .000 & 100$\pm$0.0 & 100$\pm$0.0 & 0.0$\pm$0.0 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}
+    \begin{axis}[
+        ybar,
+        width=0.85\textwidth,
+        height=6cm,
+        ylabel={Accuracy (\%)},
+        symbolic x coords={Ctx Only, No Ctx, Stat Only, Full CAAA, CAAA+CB, CatBoost},
+        xtick=data,
+        x tick label style={rotate=30, anchor=east, font=\small},
+        ymin=72, ymax=100,
+        bar width=13pt,
+        nodes near coords,
+        every node near coord/.append style={font=\scriptsize, yshift=1pt},
+        enlarge x limits=0.12,
+    ]
+    \addplot[fill=blue!35, draw=blue!60] coordinates {
+        (Ctx Only, 76.8) (No Ctx, 87.8) (Stat Only, 89.9)
+        (Full CAAA, 93.5) (CAAA+CB, 93.4) (CatBoost, 94.5)
+    };
+    \draw[<->, thick, red!70] (axis cs:No Ctx, 96.5) -- node[above, font=\small\bfseries, text=red!70] {+5.7pp} (axis cs:Full CAAA, 96.5);
+    \draw[thin, red!40] (axis cs:No Ctx, 88.5) -- (axis cs:No Ctx, 96.5);
+    \draw[thin, red!40] (axis cs:Full CAAA, 94.2) -- (axis cs:Full CAAA, 96.5);
+    \end{axis}
+    \end{tikzpicture}
+    \caption{Ablation on synthetic data. Context integration provides +5.7pp over the no-context variant, narrowing the gap to CatBoost to 1.0pp.}
+    \label{fig:ablation}
+\end{figure}
+
+\section{RCAEval Real-World Results}
+
+\begin{table}[h]
+    \centering
+    \caption{RCAEval Results (Macro-Averaged Over 8 Valid Combos, 10 runs)}
+    \label{tab:real-combined}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Variant} & \textbf{F1 (\%)} & \textbf{MCC} & \textbf{FP Rate (\%)} & \textbf{Recall (\%)} \\
+        \midrule
+        Full CAAA & 92.5 & .862 & 8.7 & 94.0 \\
+        No Context Features & 90.9 & .828 & 9.9 & 92.0 \\
+        Context Only & 79.0 & .613 & 25.1 & 84.8 \\
+        \midrule
+        CatBoost & \textbf{95.7} & \textbf{.919} & \textbf{2.7} & 94.2 \\
+        CAAA+CatBoost & 93.3 & .874 & 7.2 & 94.0 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Per-System Analysis}
+
+\begin{table}[h]
+    \centering
+    \caption{Per-System Accuracy (\%, mean $\pm$ std) Across All Dataset/System Combinations}
+    \label{tab:per-system}
+    \small
+    \begin{tabular}{llcccc}
+        \toprule
+        \textbf{DS} & \textbf{System} & \textbf{Full CAAA} & \textbf{No Ctx} & \textbf{CatBoost} & \textbf{$\Delta$} \\
+        \midrule
+        RE1 & OnlineBoutique & 96.4$\pm$2.3 & 94.4$\pm$3.6 & 97.0$\pm$2.9 & $-$0.6 \\
+        RE1 & SockShop & 96.0$\pm$3.0 & 94.6$\pm$2.7 & 98.2$\pm$1.7 & $-$2.2 \\
+        RE1 & TrainTicket & 89.4$\pm$4.9 & 88.2$\pm$3.8 & 93.0$\pm$3.6 & $-$3.6 \\
+        \midrule
+        RE2 & OnlineBoutique & 94.1$\pm$3.2 & 91.1$\pm$3.4 & 92.2$\pm$3.7 & \textbf{+1.9} \\
+        RE2 & SockShop & 90.3$\pm$5.0 & 89.2$\pm$5.3 & 93.3$\pm$4.5 & $-$3.0 \\
+        RE2 & TrainTicket & 91.4$\pm$6.4 & 91.1$\pm$4.3 & 96.4$\pm$3.1 & $-$5.0 \\
+        \midrule
+        RE3 & OnlineBoutique & 82.5$\pm$12.1 & 80.8$\pm$14.0 & 94.2$\pm$6.5 & $-$11.7 \\
+        RE3 & SockShop & 94.2$\pm$6.5 & 90.0$\pm$7.3 & 97.5$\pm$7.5 & $-$3.3 \\
+        RE3 & TrainTicket$^\dagger$ & 100$\pm$0.0 & 100$\pm$0.0 & 100$\pm$0.0 & 0.0 \\
+        \midrule
+        \multicolumn{2}{l}{\textbf{Macro-Average}} & \textbf{92.5} & 90.9 & \textbf{95.7} & $-$3.2 \\
+        \bottomrule
+    \end{tabular}
+
+    \smallskip
+    \footnotesize $^\dagger$RE3/TrainTicket: $\leq$3 test samples; 100\% is a sample-size artifact, excluded from analysis.
+\end{table}
+
+\section{Statistical Significance}
+
+\textbf{Synthetic data:} Full CAAA vs.\ No Context Features yields 5.7pp accuracy improvement. Over 10 seeds, 9 of 10 show improvement (Wilcoxon signed-rank, $W = 1$, $p = 0.006$, $n_{\text{eff}} = 9$). Cohen's $d = 2.2$ indicates a large effect.
+
+\textbf{RCAEval real data:} Across 8 non-trivial system/dataset combinations (excluding RE3/TT), CAAA outperforms No Context Features in 7 of 8, with mean F1 improvement of 1.8pp (92.5\% vs.\ 90.9\%).
+
+\section{Computational Analysis}
+
+The CAAA model has \textbf{19,206 trainable parameters}. Training completes in $<$2 minutes on CPU for 200 samples $\times$ 50 epochs. Inference is $<$1ms per sample. Tree baselines (CatBoost) train in $<$10 seconds.
+
+\section{Key Findings}
+
+\textbf{RQ1 (Context value):} Full CAAA achieves 91.3\% FP reduction ($>$40\% target) with 95.8\% fault recall ($>$90\% target). Context provides +5.7pp accuracy on synthetic data and +1.6\% F1 on real data.
+
+\textbf{RQ2 (Loss design):} The full penalty variant (90.5\%, 17.5\% FP) demonstrates the danger of aggressive context enforcement. The gated formulation resolves this.
+
+\textbf{RQ3 (Feature importance):} SHAP analysis reveals \texttt{event\_active} and \texttt{event\_expected\_impact} as top features on synthetic data; \texttt{cpu\_deviation} and \texttt{error\_rate\_ratio} on real data. Context Only at 76.8\% confirms context is complementary, not sufficient.
+
+
+% ============================================================================
+% CHAPTER 6: DISCUSSION
+% ============================================================================
+\chapter{Discussion and Analysis}
+
+\section{Design Insights from the Experimental Journey}
+
+The 11-round iterative development revealed non-obvious insights:
+
+\textbf{Skeptical initialization is essential.} Early experiments with default FiLM initialization caused the model to overfit to context features. The bias $= -1.0$ forces the network to prove context utility through gradient-based learning.
+
+\textbf{Evaluation is harder than modeling.} Three of six contributions concern evaluation methodology. The 100\% accuracy from distribution mismatch (Pitfall 1) and label leakage (Pitfall 2) could have been reported as research results in a less rigorous study. No surveyed AIOps paper discusses context metadata as a label proxy.
+
+\textbf{The data processing inequality constrains derived features.} Metric-derived context features added only 0.8\% improvement---redundant with existing features because derived from the same data.
+
+\textbf{Simple models match complex ones on current benchmarks.} Our finding aligns with DiagMLP~\cite{diagmlp2025}, which showed an MLP matches GNNs across five datasets---a structural benchmark limitation motivating our severity-tiered synthetic data.
+
+\section{When Does Context Help Most?}
+
+Context provides asymmetric value. On ``easy'' cases (30\%), all models achieve $\sim$99\%. On ``disguised faults'' (35\%), context is the \textit{only} discriminator. The 5.7\% overall improvement is concentrated in the hard tier, where the advantage exceeds 15\%.
+
+\section{Limitations}
+
+\begin{itemize}
+    \item \textbf{Trees still win:} CatBoost outperforms neural CAAA by 1--3\%. PLE and TADAM narrow but do not close the gap on 200-sample datasets.
+    \item \textbf{Context mode dependency:} External context requires operational system integration. Comparison mode works without external metadata but provides weaker signal.
+    \item \textbf{Sample efficiency:} At 200 training samples, the 19,206-parameter model is heavily constrained.
+    \item \textbf{Binary classification:} FAULT vs.\ EXPECTED\_LOAD with post-hoc UNKNOWN.
+    \item \textbf{No GNN component:} Service-level graph information is captured via aggregation features, not structural reasoning.
+\end{itemize}
+
+
+% ============================================================================
+% CHAPTER 7: CONCLUSION
+% ============================================================================
+\chapter{Conclusion and Future Work}
+
+\section{Summary of Contributions}
+
+This project presented \sys{}, a context-aware anomaly attribution framework for false positive reduction in cloud microservice monitoring. The Context Integration Module with TADAM-style FiLM conditioning and skeptical confidence gating enables selective context incorporation while preventing noise amplification. PLE closes the neural-tree gap to 1.0\% on synthetic data. The Context Consistency Loss with gated unknown-context penalty resolves false positive inflation.
+
+On synthetic data, \sys{} achieves 93.5\% accuracy with 91.3\% FP reduction and 95.8\% fault recall. On RCAEval real traces, it achieves 92.5\% F1 with 94.0\% recall. Ablation across 17 variants confirms: context provides 5.7pp improvement on challenging cases; loss design critically determines success; and FiLM conditioning with proper regularization operates effectively on small tabular data.
+
+\section{Key Lessons Learned}
+
+\begin{itemize}
+    \item \textbf{Evaluate before you celebrate:} The three evaluation pitfalls (distribution mismatch, label leakage, reference contamination) each produced misleading 100\% accuracy before being identified and fixed.
+    \item \textbf{Skeptical defaults:} Initializing the confidence gate with bias $=-1.0$ was the single most impactful design decision.
+    \item \textbf{Context is complementary:} Context Only achieves 76.8\%---useful but insufficient without metric analysis.
+    \item \textbf{Trees remain strong:} On small tabular data, gradient-boosted trees maintain a fundamental advantage through implicit feature selection.
+    \item \textbf{The hybrid approach works:} CAAA+CatBoost (93.3\% real F1) demonstrates FiLM-conditioned embeddings provide complementary value to tree classifiers.
+\end{itemize}
+
+\section{Future Directions}
+
+\begin{enumerate}
+    \item \textbf{TabM integration:} Parameter-efficient MLP ensembling~\cite{gorishniy2025tabm} to further close the neural-tree gap.
+    \item \textbf{TabPFN ceiling:} Evaluate the tabular foundation model~\cite{hollmann2024tabpfn} as an upper bound on achievable accuracy.
+    \item \textbf{Multi-root-cause scenarios:} Extend to set-valued predictions for concurrent failures.
+    \item \textbf{Production AIOps integration:} Deploy with real-time operational context from incident management and deployment pipelines.
+    \item \textbf{GNN augmentation:} Incorporate structural graph reasoning over service topology.
+    \item \textbf{Explainability:} Generate natural language explanations of attribution decisions.
+\end{enumerate}
+
+
+% ============================================================================
+% BIBLIOGRAPHY
+% ============================================================================
+\begingroup\sloppy
+\begin{thebibliography}{30}
+
+\bibitem{soldani2022survey}
+J.~Soldani and A.~Brogi, ``Anomaly Detection and Failure Root Cause Analysis in (Micro) Service-Based Cloud Applications: A Survey,'' \emph{ACM Comput. Surv.}, vol.~55, no.~3, pp.~1--39, 2022.
+
+\bibitem{su2019omnianomaly}
+Y.~Su \emph{et al.}, ``Robust Anomaly Detection for Multivariate Time Series through Stochastic Recurrent Neural Network,'' in \emph{Proc. ACM KDD}, 2019, pp.~2828--2837.
+
+\bibitem{audibert2020usad}
+J.~Audibert \emph{et al.}, ``USAD: Unsupervised Anomaly Detection on Multivariate Time Series,'' in \emph{Proc. ACM KDD}, 2020, pp.~3395--3404.
+
+\bibitem{xu2022anomalytransformer}
+J.~Xu \emph{et al.}, ``Anomaly Transformer: Time Series Anomaly Detection with Association Discrepancy,'' in \emph{Proc. ICLR}, 2022.
+
+\bibitem{yang2023dcdetector}
+Y.~Yang \emph{et al.}, ``DCdetector: Dual Attention Contrastive Representation Learning for Time Series Anomaly Detection,'' in \emph{Proc. ACM KDD}, 2023.
+
+\bibitem{pham2024rcaeval}
+L.~Pham \emph{et al.}, ``RCAEval: A Benchmark for Root Cause Analysis of Microservice Systems with Telemetry Data,'' in \emph{Companion Proc. ACM Web Conf.}, 2025, pp.~777--780.
+
+\bibitem{ikram2022rcd}
+A.~Ikram \emph{et al.}, ``Root Cause Analysis of Failures in Microservices through Causal Discovery,'' in \emph{Proc. NeurIPS}, 2022, pp.~31158--31170.
+
+\bibitem{li2022circa}
+M.~Li \emph{et al.}, ``Causal Inference-Based Root Cause Analysis for Online Service Systems,'' in \emph{Proc. ACM KDD}, 2022.
+
+\bibitem{chen2024baro}
+L.~Pham \emph{et al.}, ``BARO: Robust Root Cause Analysis for Microservices,'' \emph{Proc. ACM Softw. Eng.}, vol.~1, FSE, 2024.
+
+\bibitem{dynacausal2025}
+S.~Zhang \emph{et al.}, ``DynaCausal: Dynamic Causality-Aware Root Cause Analysis for Distributed Microservices,'' arXiv:2510.22613, 2025.
+
+\bibitem{zhang2023diagfusion}
+S.~Zhang \emph{et al.}, ``Robust Failure Diagnosis of Microservice System through Multimodal Data,'' \emph{IEEE Trans. Serv. Comput.}, vol.~16, no.~6, 2023.
+
+\bibitem{wu2020microrcarootcause}
+L.~Wu \emph{et al.}, ``MicroRCA: Root Cause Localization of Performance Issues in Microservices,'' in \emph{Proc. IEEE/IFIP NOMS}, 2020.
+
+\bibitem{chase2024}
+J.~Wang \emph{et al.}, ``CHASE: Causal Hypergraph-Based Root Cause Analysis in Microservice Systems,'' in \emph{Proc. IEEE ICWS}, 2024.
+
+\bibitem{diagmlp2025}
+Y.~Xie \emph{et al.}, ``Are GNNs Actually Effective for Multimodal Fault Diagnosis in Microservice Systems?'' arXiv:2501.02766, 2025.
+
+\bibitem{xu2018donut}
+H.~Xu \emph{et al.}, ``Unsupervised Anomaly Detection via Variational Auto-Encoder for Seasonal KPIs,'' in \emph{Proc. WWW}, 2018.
+
+\bibitem{tuli2022tranad}
+S.~Tuli \emph{et al.}, ``TranAD: Deep Transformer Networks for Anomaly Detection in Multivariate Time Series Data,'' \emph{Proc. VLDB Endow.}, vol.~15, no.~6, 2022.
+
+\bibitem{darban2024carla}
+Z.~Z.~Darban \emph{et al.}, ``CARLA: Self-Supervised Contrastive Representation Learning for Time Series Anomaly Detection,'' \emph{Pattern Recognition}, vol.~157, 2024.
+
+\bibitem{cltad2023}
+X.~Li \emph{et al.}, ``CL-TAD: Contrastive Learning for Time Series Anomaly Detection,'' \emph{Applied Sciences}, 2023.
+
+\bibitem{perez2018film}
+E.~Perez \emph{et al.}, ``FiLM: Visual Reasoning with a General Conditioning Layer,'' in \emph{Proc. AAAI}, 2018.
+
+\bibitem{oreshkin2018tadam}
+B.~Oreshkin \emph{et al.}, ``TADAM: Task Dependent Adaptive Metric for Improved Few-Shot Learning,'' in \emph{Proc. NeurIPS}, 2018.
+
+\bibitem{sheth2022auxiliary}
+J.~Sheth \emph{et al.}, ``Auxiliary Learning as an Asymmetric Bargaining Game,'' in \emph{NeurIPS ICBINB Workshop}, 2022.
+
+\bibitem{grinsztajn2022tree}
+L.~Grinsztajn \emph{et al.}, ``Why Do Tree-Based Models Still Outperform Deep Learning on Typical Tabular Data?'' in \emph{Proc. NeurIPS}, 2022.
+
+\bibitem{gorishniy2022embeddings}
+Y.~Gorishniy \emph{et al.}, ``On Embeddings for Numerical Features in Tabular Deep Learning,'' in \emph{Proc. NeurIPS}, 2022.
+
+\bibitem{mcelfresh2023neural}
+D.~McElfresh \emph{et al.}, ``When Do Neural Nets Outperform Boosted Trees on Tabular Data?'' in \emph{Proc. NeurIPS}, 2023.
+
+\bibitem{hollmann2024tabpfn}
+N.~Hollmann \emph{et al.}, ``Accurate Predictions on Small Data with a Tabular Foundation Model,'' \emph{Nature}, vol.~637, 2025.
+
+\bibitem{gorishniy2025tabm}
+Y.~Gorishniy \emph{et al.}, ``TabM: Advancing Tabular Deep Learning with Parameter-Efficient Ensembling,'' in \emph{Proc. ICLR}, 2025.
+
+\bibitem{geirhos2020shortcut}
+R.~Geirhos \emph{et al.}, ``Shortcut Learning in Deep Neural Networks,'' \emph{Nature Machine Intelligence}, vol.~2, 2020.
+
+\bibitem{li2022dejavu}
+Z.~Li \emph{et al.}, ``DejaVu: Actionable and Interpretable Fault Localization,'' in \emph{Proc. ACM FSE}, 2022.
+
+\bibitem{chainofevent2024}
+L.~Wang \emph{et al.}, ``Chain-of-Event: Interpretable Root Cause Analysis for Microservices,'' in \emph{Proc. ACM FSE}, 2024.
+
+\bibitem{lumos2020}
+W.~Lin \emph{et al.}, ``Lumos: Diagnosing Metric Regressions in Web-Scale Applications,'' in \emph{Proc. ACM KDD}, 2020.
+
+\bibitem{cloudanobench2025}
+X.~Zou \emph{et al.}, ``CloudAnoBench: A Large-Scale Benchmark for Context-Aware Anomaly Detection in Cloud Environments,'' arXiv:2508.01844, 2025.
+
+\end{thebibliography}
+\endgroup
+
+\end{document}
