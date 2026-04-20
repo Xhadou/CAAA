@@ -201,47 +201,47 @@ integration, tabular deep learning, scaling laws, evaluation methodology
 
 The software industry has undergone a fundamental architectural transformation over the past decade, shifting from monolithic applications to microservice-based systems~\cite{soldani2022survey}. Organizations such as Netflix, Amazon, and Uber have decomposed their applications into hundreds or thousands of independently deployable services. While this architectural pattern offers significant benefits---improved scalability, faster deployment cycles, and technology flexibility---it introduces substantial complexity in system observability and fault diagnosis.
 
-Anomaly detection in these systems has progressed through three generations: from statistical baselines (N-Sigma, SPOT) through reconstruction-based deep learning (OmniAnomaly~\cite{su2019omnianomaly}, USAD~\cite{audibert2020usad}) to the current generation of attention-based approaches (Anomaly Transformer~\cite{xu2022anomalytransformer}, DCdetector~\cite{yang2023dcdetector}). Despite achieving F1 scores of 83--97\% on controlled benchmarks, production adoption remains limited by a persistent problem: false positive rates of 6--28\%~\cite{soldani2022survey}, with even state-of-the-art root cause analysis methods achieving only 46--63\% localization accuracy on large-scale systems~\cite{pham2024rcaeval}.
+Anomaly detection in these systems has progressed through three generations: from statistical baselines (N-Sigma, SPOT) through reconstruction-based deep learning (OmniAnomaly~\cite{su2019omnianomaly}, USAD~\cite{audibert2020usad}) to the current generation of attention-based approaches (Anomaly Transformer~\cite{xu2022anomalytransformer}, DCdetector~\cite{yang2023dcdetector}). Despite F1 scores of 83--97\% on controlled benchmarks, production adoption remains limited by a persistent problem: false-positive rates of 6--28\%~\cite{soldani2022survey}, with even state-of-the-art root-cause analysis methods achieving only 46--63\% localization accuracy on large-scale systems~\cite{pham2024rcaeval}.
 
 \section{Motivation}
 
 The core limitation of existing approaches is the lack of \textit{contextual awareness}. A sudden spike in CPU utilization and request latency appears identical to an anomaly detector whether caused by a cascading fault or by a planned marketing campaign driving legitimate traffic. Current methods treat all anomalous-looking patterns as faults, producing false alerts whenever normal operational events---scheduled load tests, auto-scaling events, time-of-day traffic peaks, or recent deployments---cause metric deviations.
 
-Our survey of six major AIOps papers (DejaVu~\cite{li2022dejavu}, BARO~\cite{chen2024baro}, RCAEval~\cite{pham2024rcaeval}, Chain-of-Event~\cite{chainofevent2024}, Night's Watch, Lumos~\cite{lumos2020}) revealed a striking finding: \textit{no prior work uses operational context as model features}. All systems operate exclusively on raw telemetry (metrics, logs, traces) without incorporating deployment metadata, scheduled event flags, or time-of-day encodings. Lumos is the sole exception, using A/B testing to control for confounders, but it requires controlled experiments rather than operating on production observability data.
+Our survey of six major AIOps papers (DejaVu~\cite{li2022dejavu}, BARO~\cite{chen2024baro}, RCAEval~\cite{pham2024rcaeval}, Chain-of-Event~\cite{chainofevent2024}, Night's Watch, Lumos~\cite{lumos2020}) revealed that \textit{no prior work uses operational context as model features}. All systems operate exclusively on raw telemetry (metrics, logs, traces) without incorporating deployment metadata, scheduled event flags, or time-of-day encodings. Lumos is the sole exception, using A/B testing to control for confounders, but it requires controlled experiments rather than operating on production observability data.
 
-CloudAnoBench~\cite{cloudanobench2025}, released in 2025, is the first benchmark to include 16 ``deceptive normal scenarios'' where anomalous-looking patterns are explained by benign events, but provides no mechanism to incorporate contextual explanations into the detection pipeline.
+Beyond the context gap, there is an open empirical question specific to microservice anomaly attribution: \emph{when data is abundant, does a well-designed neural architecture outperform gradient-boosted trees?} Published results on general tabular tasks~\cite{grinsztajn2022tree,mcelfresh2023neural} indicate a sample-size-dependent crossover, but this has not been characterized for attribution tasks, where the feature vector combines metric statistics with structured context. Real microservice benchmarks contain at most $\sim$1{,}500 labeled cases pooled across systems, below the regime where a crossover is typically observable.
 
 \section{Problem Statement}
 
-We address the following research questions:
+We address three research questions:
 
 \begin{enumerate}
-    \item \textbf{RQ1:} Can integrating operational context signals (scheduled events, deployments, time-of-day patterns) into anomaly classification reduce false positives by $>$40\% while maintaining $>$90\% fault recall?
-    \item \textbf{RQ2:} How does the proposed Context Consistency Loss compare to standard cross-entropy for training context-aware classifiers?
-    \item \textbf{RQ3:} Which context features contribute most to false positive reduction, and how does performance degrade as context availability decreases?
+    \item \textbf{RQ1 (Value and generality of context):} Does integrating operational context (scheduled events, deployments, time-of-day patterns) materially improve anomaly attribution, and is the improvement specific to a particular neural architecture or a general, reproducible signal across model families?
+    \item \textbf{RQ2 (Architectural crossover with scale):} Does a context-conditioned neural architecture (\sys{}) outperform strong gradient-boosted-tree baselines, and if so, under what sample-size regime?
+    \item \textbf{RQ3 (Evaluation safeguards):} What methodological safeguards are required to produce trustworthy results in a context-aware benchmark---specifically, how do distribution mismatch, label-leakage through context, and reference contamination manifest, and how can they be prevented?
 \end{enumerate}
 
 \section{Contributions}
 
-This project makes the following novel contributions:
+This project makes the following contributions:
 
 \begin{enumerate}
-    \item \textbf{Context-Aware Anomaly Attribution:} The first framework to explicitly distinguish workload-induced anomalies from actual faults using operational context signals within a unified classification pipeline.
-    
-    \item \textbf{Context Consistency Loss:} A composite loss function with gated unknown-context penalty and TADAM-style delta regularization, preventing FiLM noise amplification on small datasets.
-    
-    \item \textbf{Context Integration Module:} FiLM conditioning with skeptical confidence gating (bias $= -1.0$, initial gate output $\approx 0.27$) and feature-group dropout for noise robustness.
-    
-    \item \textbf{Piecewise Linear Embeddings (PLE):} Quantile-based bin encodings that give MLPs axis-aligned threshold capability, closing the neural-tree gap to 1.0\% on synthetic data.
-    
-    \item \textbf{CAAA+CatBoost Hybrid:} FiLM-conditioned neural embeddings concatenated with raw features, classified by CatBoost---the first work combining FiLM conditioning with tree-based downstream classifiers.
-    
-    \item \textbf{Evaluation Methodology:} Severity-tiered synthetic data with disguised faults, pre-injection split for distribution-matched RCAEval evaluation, counterfactual baselines via RNG forking, and label leakage prevention via randomized context assignment.
+    \item \textbf{Difficulty-aware synthetic benchmark with five anti-leakage safeguards:} A synthetic fault-injection pipeline supporting two difficulty levels (default and hard), with context-independent label sampling, randomized context assignment, pre-injection splits for real-data parity, counterfactual baselines via RNG forking, and stratified train/val/test splits.
+
+    \item \textbf{Unified 44-dimensional feature taxonomy shared across synthetic and real data:} A single feature vector schema where the 5-dimensional context slice has identical semantics on synthetic RCAEval-style cases and on real RCAEval traces, enabling direct per-model-family contribution analysis.
+
+    \item \textbf{Controlled scaling study from 500 to 40{,}000 samples:} Ten model variants (Full \sys{}, \sys{} no-context, CatBoost~$\pm$ context, XGBoost~$\pm$ context, LightGBM~$\pm$ context, RandomForest~$\pm$ context), evaluated with 10 random seeds at the headline scale, with Welch's t-test significance testing.
+
+    \item \textbf{Empirical evidence of a neural-over-tree crossover on anomaly attribution:} At $n = 40{,}000$ on the harder synthetic task, Full \sys{} reaches $95.11\% \pm 0.18$ F1 versus $94.90\% \pm 0.21$ for CatBoost~with~context (Welch's $t = 2.249$, $p = 0.038$). We report the effect size honestly: this is a statistically detectable but practically modest advantage that confirms a crossover regime rather than large architectural dominance.
+
+    \item \textbf{The universal-context finding:} The same 5-dimensional context slice yields $+1.28$, $+1.70$, $+1.60$, $+1.58$, and $+2.30$ percentage points of F1 on CAAA, CatBoost, XGBoost, LightGBM, and RandomForest respectively. The effect is 6--10$\times$ larger than the best neural-over-tree gap and replicates across every architecture class evaluated.
+
+    \item \textbf{\sys{} architecture as a principled context-integration instance:} FiLM conditioning~\cite{perez2018film} with TADAM-style delta initialization~\cite{oreshkin2018tadam}, skeptical confidence gating (bias~$=-1.0$), Piecewise Linear Embeddings~\cite{gorishniy2022embeddings} for axis-aligned thresholding, and a Context Consistency Loss with gated unknown-context penalty. We position this as one principled way to integrate context---the scientific contribution generalizes to tree-based classifiers via simple concatenation.
 \end{enumerate}
 
 \section{Report Organization}
 
-The remainder of this report is organized as follows: Chapter~2 reviews related work across anomaly detection, root cause analysis, FiLM conditioning, and tabular deep learning. Chapter~3 details the proposed methodology including architecture design, loss functions, and hybrid approaches. Chapter~4 presents the evaluation methodology, a first-class contribution addressing three evaluation pitfalls. Chapter~5 presents comprehensive experimental results. Chapter~6 provides discussion, error analysis, and limitations. Chapter~7 concludes with lessons learned and future directions.
+The remainder of this report is organized as follows. Chapter~2 surveys related work across time-series anomaly detection, microservice root-cause analysis, FiLM-style conditioning, tabular deep learning, and the scaling-law literature. Chapter~3 details the \sys{} architecture, feature design, and loss formulation. Chapter~4 presents our data methodology: the limits of real benchmarks, the design of the synthetic generator, the five anti-leakage safeguards, and the unified context feature taxonomy. Chapter~5 reports honest real-data results on RCAEval. Chapter~6 presents the scaling study with both default and hard difficulty levels and establishes the neural-over-tree crossover. Chapter~7 delivers the universal-context contribution finding---the headline result---across all five model families. Chapter~8 discusses implications, limitations, and concludes.
 
 
 % ============================================================================
