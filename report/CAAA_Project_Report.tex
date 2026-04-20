@@ -607,147 +607,134 @@ The anti-leakage safeguards in §4.4 were not designed ab initio; they were iden
 These three pitfalls, each initially producing misleading $100\%$ accuracy, illustrate a general point: any context-aware evaluation pipeline requires explicit leakage audits, because the most useful contextual features are precisely those most capable of proxying the label.
 
 % ============================================================================
-% CHAPTER 5: EXPERIMENTS AND RESULTS
+% CHAPTER 5: REAL-DATA RESULTS
 % ============================================================================
-\chapter{Experiments and Results}
+\chapter{Real-Data Results}
+
+This chapter reports \sys{}'s performance on the RCAEval benchmark across all three microservice systems and three dataset variants. We frame the results honestly: on real data at current benchmark scale, gradient-boosted trees remain the strongest model family. The chapter that follows (Chapter~6) tests whether this outcome is a sample-size artifact or an intrinsic architectural property.
 
 \section{Experimental Setup}
 
-\textbf{Synthetic data:} 200 samples (100 fault, 100 load), severity-tiered, \texttt{context\_mode="external"}. 11 fault types, 12 services per system, 60-timestep windows.
+\textbf{Data.} RCAEval real microservice failure traces from Zenodo (DOI:~10.5281/zenodo.14590730) across three systems---OnlineBoutique (12 services), SockShop (15 services), TrainTicket (64 services)---and three dataset variants: RE1 (metrics-only, 375 cases), RE2 (multi-source with logs and traces, 270 cases), RE3 (code-level faults, 90 cases). Nine system-by-dataset combinations in total. Pre-injection splits are applied per safeguard~3 in §4.4; randomized context assignment per safeguard~2.
 
-\textbf{RCAEval data:} Real microservice failure traces from Zenodo (DOI: 10.5281/zenodo.14590730) across OnlineBoutique (12 services), SockShop (15 services), and TrainTicket (64 services). Three dataset variants: RE1 (metrics only, 375 cases), RE2 (multi-source, 270 cases), RE3 (code-level faults, 90 cases). Pre-injection split with randomized context assignment.
+\textbf{Baselines.} We compare 17 model variants: four \sys{} variants (Full, clamp-loss, full-penalty, contrastive-augmented), five ablation variants (No Context Features, No Context Loss, No Behavioral, Context Only, Statistical Only, Stat + Service-Level), four tree baselines (Baseline RF, XGBoost, LightGBM, CatBoost), CatBoost with context, the CAAA+CatBoost hybrid, and two trivial baselines (Rule-Based, Na\"ive). All experiments use 10 random seeds; means and standard deviations are reported.
 
-\textbf{Implementation:} PyTorch 2.6, scikit-learn 1.3+, XGBoost, LightGBM, CatBoost, SHAP. All experiments report mean $\pm$ std across 10 seeds.
+\textbf{Implementation.} PyTorch 2.6, scikit-learn 1.3+, XGBoost, LightGBM, CatBoost, SHAP~\cite{lundberg2017shap}. Neural models train with AdamW (learning rate $10^{-3}$, weight decay $10^{-3}$) for up to 50 epochs with early stopping. Tree baselines use each library's default hyperparameters with 100 trees.
 
-\section{Synthetic Data Results}
+\section{Pooled Real-Data Results}
+
+Table~\ref{tab:real-pooled} summarizes performance macro-averaged across the nine valid system-by-dataset cells.
 
 \begin{table}[h]
     \centering
-    \caption{Synthetic Data Results (10 runs, 200 samples, mean $\pm$ std)}
-    \label{tab:synthetic}
+    \caption{Pooled RCAEval Results (Macro-Averaged Over 9 System/Dataset Cells, 10 runs)}
+    \label{tab:real-pooled}
     \small
-    \begin{tabular}{lccccc}
-        \toprule
-        \textbf{Variant} & \textbf{Acc (\%)} & \textbf{MCC} & \textbf{FP (\%)} & \textbf{Recall (\%)} & \textbf{FPR (\%)} \\
-        \midrule
-        Full CAAA (gated) & 93.5$\pm$1.5 & .874$\pm$.03 & 8.8$\pm$4.5 & 95.8$\pm$3.9 & 91.3$\pm$4.5 \\
-        CAAA (clamp) & 93.8$\pm$2.4 & .878$\pm$.05 & 6.5$\pm$4.2 & 94.0$\pm$4.9 & 93.5$\pm$4.2 \\
-        CAAA (full penalty) & 90.5$\pm$2.8 & .821$\pm$.05 & 17.5$\pm$5.0 & 98.5$\pm$2.0 & 82.5$\pm$5.0 \\
-        \midrule
-        No Context Features & 87.8$\pm$3.0 & .761$\pm$.06 & 11.8$\pm$7.9 & 87.3$\pm$5.3 & 88.3$\pm$7.9 \\
-        No Context Loss & 94.0$\pm$1.8 & .882$\pm$.04 & 5.3$\pm$2.8 & 93.3$\pm$4.8 & 94.8$\pm$2.8 \\
-        Context Only & 76.8$\pm$4.1 & .538$\pm$.09 & 24.5$\pm$3.8 & 78.0$\pm$7.8 & 75.5$\pm$3.8 \\
-        Statistical Only & 89.9$\pm$3.9 & .804$\pm$.08 & 5.5$\pm$6.0 & 85.3$\pm$6.1 & 94.5$\pm$6.0 \\
-        \midrule
-        Baseline RF & 94.1$\pm$2.4 & .886$\pm$.05 & 3.8$\pm$3.4 & 92.0$\pm$5.1 & 96.3$\pm$3.4 \\
-        CatBoost & \textbf{94.5}$\pm$1.9 & \textbf{.891}$\pm$.04 & 5.3$\pm$2.4 & 94.3$\pm$3.5 & 94.8$\pm$2.4 \\
-        CAAA+CatBoost & 93.4$\pm$1.7 & .868$\pm$.03 & 5.3$\pm$1.8 & 92.0$\pm$2.9 & 94.8$\pm$1.8 \\
-        \midrule
-        Rule-Based & 23.5$\pm$3.7 & $-$.531 & 76.3$\pm$3.2 & 23.3$\pm$6.2 & 23.8$\pm$3.2 \\
-        Na\"ive & 50.0$\pm$0.0 & .000 & 100$\pm$0.0 & 100$\pm$0.0 & 0.0$\pm$0.0 \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-\begin{figure}[h]
-    \centering
-    \begin{tikzpicture}
-    \begin{axis}[
-        ybar,
-        width=0.85\textwidth,
-        height=6cm,
-        ylabel={Accuracy (\%)},
-        symbolic x coords={Ctx Only, No Ctx, Stat Only, Full CAAA, CAAA+CB, CatBoost},
-        xtick=data,
-        x tick label style={rotate=30, anchor=east, font=\small},
-        ymin=72, ymax=100,
-        bar width=13pt,
-        nodes near coords,
-        every node near coord/.append style={font=\scriptsize, yshift=1pt},
-        enlarge x limits=0.12,
-    ]
-    \addplot[fill=blue!35, draw=blue!60] coordinates {
-        (Ctx Only, 76.8) (No Ctx, 87.8) (Stat Only, 89.9)
-        (Full CAAA, 93.5) (CAAA+CB, 93.4) (CatBoost, 94.5)
-    };
-    \draw[<->, thick, red!70] (axis cs:No Ctx, 96.5) -- node[above, font=\small\bfseries, text=red!70] {+5.7pp} (axis cs:Full CAAA, 96.5);
-    \draw[thin, red!40] (axis cs:No Ctx, 88.5) -- (axis cs:No Ctx, 96.5);
-    \draw[thin, red!40] (axis cs:Full CAAA, 94.2) -- (axis cs:Full CAAA, 96.5);
-    \end{axis}
-    \end{tikzpicture}
-    \caption{Ablation on synthetic data. Context integration provides +5.7pp over the no-context variant, narrowing the gap to CatBoost to 1.0pp.}
-    \label{fig:ablation}
-\end{figure}
-
-\section{RCAEval Real-World Results}
-
-\begin{table}[h]
-    \centering
-    \caption{RCAEval Results (Macro-Averaged Over 8 Valid Combos, 10 runs)}
-    \label{tab:real-combined}
     \begin{tabular}{lcccc}
         \toprule
-        \textbf{Variant} & \textbf{F1 (\%)} & \textbf{MCC} & \textbf{FP Rate (\%)} & \textbf{Recall (\%)} \\
+        \textbf{Variant} & \textbf{F1} & \textbf{MCC} & \textbf{FP Rate} & \textbf{Recall} \\
         \midrule
-        Full CAAA & 92.5 & .862 & 8.7 & 94.0 \\
-        No Context Features & 90.9 & .828 & 9.9 & 92.0 \\
-        Context Only & 79.0 & .613 & 25.1 & 84.8 \\
+        Full \sys{} & 0.9264 & .8642 & .088 & .944 \\
+        \sys{} + Contrastive & 0.9217 & .8572 & .084 & .934 \\
+        \sys{} (clamp loss) & 0.9264 & .8642 & .088 & .944 \\
+        \sys{} (full penalty) & 0.8952 & .8063 & .151 & .947 \\
         \midrule
-        CatBoost & \textbf{95.7} & \textbf{.919} & \textbf{2.7} & 94.2 \\
-        CAAA+CatBoost & 93.3 & .874 & 7.2 & 94.0 \\
+        No Context Features & 0.9095 & .8280 & .098 & .919 \\
+        No Context Loss & 0.9270 & .8630 & .073 & .929 \\
+        No Behavioral & 0.9273 & .8628 & .084 & .940 \\
+        Context Only & 0.7883 & .6120 & .250 & .844 \\
+        Statistical Only & 0.8866 & .7821 & .114 & .890 \\
+        Stat + Service-Level & 0.9180 & .8451 & .081 & .919 \\
+        \midrule
+        Baseline RF & 0.9431 & .8927 & .054 & .941 \\
+        XGBoost & 0.9337 & .8736 & .061 & .930 \\
+        LightGBM & 0.9400 & .8855 & .055 & .936 \\
+        \textbf{CatBoost} & \textbf{0.9542} & \textbf{.9127} & \textbf{.029} & .938 \\
+        \textbf{CatBoost (with context)} & \textbf{0.9571} & \textbf{.9189} & \textbf{.027} & \textbf{.942} \\
+        \sys{}+CatBoost Hybrid & 0.9328 & .8729 & .073 & .940 \\
+        \midrule
+        Rule-Based & 0.5064 & .1915 & .537 & .688 \\
+        Na\"ive & 0.3340 & .0000 & 1.00 & 1.00 \\
         \bottomrule
     \end{tabular}
 \end{table}
 
 \section{Per-System Analysis}
 
+Table~\ref{tab:per-system} shows F1 across the nine system-by-dataset cells for the three headline variants.
+
 \begin{table}[h]
     \centering
-    \caption{Per-System Accuracy (\%, mean $\pm$ std) Across All Dataset/System Combinations}
+    \caption{Per-System F1 ($\%$) Across All Dataset/System Combinations (10 seeds, mean)}
     \label{tab:per-system}
     \small
-    \begin{tabular}{llcccc}
+    \begin{tabular}{llccccc}
         \toprule
-        \textbf{DS} & \textbf{System} & \textbf{Full CAAA} & \textbf{No Ctx} & \textbf{CatBoost} & \textbf{$\Delta$} \\
+        \textbf{DS} & \textbf{System} & \textbf{Full \sys{}} & \textbf{No Ctx} & \textbf{CatBoost} & \textbf{CatBoost+Ctx} & \textbf{$\Delta_{\text{Full vs Cat+Ctx}}$} \\
         \midrule
-        RE1 & OnlineBoutique & 96.4$\pm$2.3 & 94.4$\pm$3.6 & 97.0$\pm$2.9 & $-$0.6 \\
-        RE1 & SockShop & 96.0$\pm$3.0 & 94.6$\pm$2.7 & 98.2$\pm$1.7 & $-$2.2 \\
-        RE1 & TrainTicket & 89.4$\pm$4.9 & 88.2$\pm$3.8 & 93.0$\pm$3.6 & $-$3.6 \\
+        RE1 & OnlineBoutique & 96.2 & 94.8 & 97.2 & 97.0 & $-$0.8 \\
+        RE1 & SockShop & 95.8 & 94.6 & 95.6 & 98.2 & $-$2.4 \\
+        RE1 & TrainTicket & 89.3 & 88.1 & 91.4 & 93.0 & $-$3.7 \\
         \midrule
-        RE2 & OnlineBoutique & 94.1$\pm$3.2 & 91.1$\pm$3.4 & 92.2$\pm$3.7 & \textbf{+1.9} \\
-        RE2 & SockShop & 90.3$\pm$5.0 & 89.2$\pm$5.3 & 93.3$\pm$4.5 & $-$3.0 \\
-        RE2 & TrainTicket & 91.4$\pm$6.4 & 91.1$\pm$4.3 & 96.4$\pm$3.1 & $-$5.0 \\
+        RE2 & OnlineBoutique & 94.0 & 91.6 & 95.1 & 92.1 & $+$1.9 \\
+        RE2 & SockShop & 91.3 & 88.0 & 92.8 & 93.3 & $-$2.0 \\
+        RE2 & TrainTicket & 92.5 & 91.3 & 94.4 & 96.4 & $-$3.9 \\
         \midrule
-        RE3 & OnlineBoutique & 82.5$\pm$12.1 & 80.8$\pm$14.0 & 94.2$\pm$6.5 & $-$11.7 \\
-        RE3 & SockShop & 94.2$\pm$6.5 & 90.0$\pm$7.3 & 97.5$\pm$7.5 & $-$3.3 \\
-        RE3 & TrainTicket$^\dagger$ & 100$\pm$0.0 & 100$\pm$0.0 & 100$\pm$0.0 & 0.0 \\
+        RE3 & OnlineBoutique & 81.5 & 80.4 & 95.8 & 94.1 & $-$12.6 \\
+        RE3 & SockShop & 93.2 & 89.8 & 97.3 & 97.3 & $-$4.1 \\
+        RE3 & TrainTicket$^\dagger$ & 100.0 & 100.0 & 99.2 & 100.0 & $0$ \\
         \midrule
-        \multicolumn{2}{l}{\textbf{Macro-Average}} & \textbf{92.5} & 90.9 & \textbf{95.7} & $-$3.2 \\
+        \multicolumn{2}{l}{\textbf{Macro-Average}} & \textbf{92.6} & 90.9 & \textbf{95.4} & \textbf{95.7} & $-$3.1 \\
         \bottomrule
     \end{tabular}
 
     \smallskip
-    \footnotesize $^\dagger$RE3/TrainTicket: $\leq$3 test samples; 100\% is a sample-size artifact, excluded from analysis.
+    \footnotesize $^\dagger$RE3/TrainTicket: $\leq 3$ test samples; 100\% is a sample-size artifact, excluded from macro-average computation but shown for completeness.
 \end{table}
 
-\section{Statistical Significance}
+The pattern is consistent: Full \sys{} is competitive (within a few points of the tree baselines) on most cells and matches the leading tree on RE2/OnlineBoutique, but the macro-average gap is $-3.1$ pp F1 relative to CatBoost with context. The largest deficits appear on the smaller dataset variants (RE3), where the neural model has the least training signal.
 
-\textbf{Synthetic data:} Full CAAA vs.\ No Context Features yields 5.7pp accuracy improvement. Over 10 seeds, 9 of 10 show improvement (Wilcoxon signed-rank, $W = 1$, $p = 0.006$, $n_{\text{eff}} = 9$). Cohen's $d = 2.2$ indicates a large effect.
+\section{Honest Interpretation}
 
-\textbf{RCAEval real data:} Across 8 non-trivial system/dataset combinations (excluding RE3/TT), CAAA outperforms No Context Features in 7 of 8, with mean F1 improvement of 1.8pp (92.5\% vs.\ 90.9\%).
+On the RCAEval benchmark at its current scale, CatBoost (with or without context) is the strongest model family evaluated. Full \sys{} achieves F1~$=92.6\%$, ranking below CatBoost~with~context ($95.7\%$), CatBoost ($95.4\%$), Baseline~RF ($94.3\%$), and LightGBM ($94.0\%$). We emphasize this rather than minimize it: \emph{on real data at $n \approx 1{,}500$, deployment should prefer gradient-boosted trees}. The present chapter does not argue otherwise.
 
-\section{Computational Analysis}
+This outcome is fully consistent with published findings on small tabular data~\cite{grinsztajn2022tree,shwartzziv2022tabular,mcelfresh2023neural}: at low sample sizes and moderate feature dimensionality, tree ensembles' axis-aligned split-finding, robustness to uninformative features, and rotation non-invariance dominate the inductive biases of MLP-style neural architectures. Chapter~6 tests whether this is a consequence of sample-size (resolvable by scaling the dataset) or an intrinsic architectural limit.
 
-The CAAA model has \textbf{19,206 trainable parameters}. Training completes in $<$2 minutes on CPU for 200 samples $\times$ 50 epochs. Inference is $<$1ms per sample. Tree baselines (CatBoost) train in $<$10 seconds.
+One observation worth noting within the real-data results: CatBoost with context outperforms CatBoost without context ($95.71\%$ vs.\ $95.42\%$, $+0.29$ pp pooled F1 across the nine cells). The effect is small but directionally consistent with the much larger context-contribution effects seen at scale in Chapter~7. This is the directional corroboration required by our synthetic-data validity argument in §2.7.
 
-\section{Key Findings}
+\section{Ablation on Synthetic Data (Brief)}
 
-\textbf{RQ1 (Context value):} Full CAAA achieves 91.3\% FP reduction ($>$40\% target) with 95.8\% fault recall ($>$90\% target). Context provides +5.7pp accuracy on synthetic data and +1.6\% F1 on real data.
+For completeness, Table~\ref{tab:synthetic-brief} reports the ablation on the small 200-sample synthetic subset used during model development. This is the same sample regime as the real data and should not be confused with the large-scale synthetic scaling study in Chapter~6, which tests what happens when sample size grows.
 
-\textbf{RQ2 (Loss design):} The full penalty variant (90.5\%, 17.5\% FP) demonstrates the danger of aggressive context enforcement. The gated formulation resolves this.
+\begin{table}[h]
+    \centering
+    \caption{Synthetic Ablation at $n{=}200$ (10 runs, mean $\pm$ std)}
+    \label{tab:synthetic-brief}
+    \small
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Variant} & \textbf{Acc ($\%$)} & \textbf{FP ($\%$)} & \textbf{Recall ($\%$)} \\
+        \midrule
+        Full \sys{} (gated) & $93.5 \pm 1.5$ & $8.8 \pm 4.5$ & $95.8 \pm 3.9$ \\
+        \sys{} (clamp) & $93.8 \pm 2.4$ & $6.5 \pm 4.2$ & $94.0 \pm 4.9$ \\
+        \sys{} (full penalty) & $90.5 \pm 2.8$ & $17.5 \pm 5.0$ & $98.5 \pm 2.0$ \\
+        No Context Features & $87.8 \pm 3.0$ & $11.8 \pm 7.9$ & $87.3 \pm 5.3$ \\
+        Context Only & $76.8 \pm 4.1$ & $24.5 \pm 3.8$ & $78.0 \pm 7.8$ \\
+        CatBoost & $94.5 \pm 1.9$ & $5.3 \pm 2.4$ & $94.3 \pm 3.5$ \\
+        \sys{}+CatBoost Hybrid & $93.4 \pm 1.7$ & $5.3 \pm 1.8$ & $92.0 \pm 2.9$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
 
-\textbf{RQ3 (Feature importance):} SHAP analysis reveals \texttt{event\_active} and \texttt{event\_expected\_impact} as top features on synthetic data; \texttt{cpu\_deviation} and \texttt{error\_rate\_ratio} on real data. Context Only at 76.8\% confirms context is complementary, not sufficient.
+At $n{=}200$, context integration narrows the \sys{}-to-CatBoost gap from $6.7$ pp (No Context: $87.8\%$) to $1.0$ pp (Full \sys{}: $93.5\%$ vs.\ CatBoost: $94.5\%$). This confirms context features add value on small data but do not invert the tree advantage. The pattern matches the per-family analysis in Chapter~7 at large scale.
 
+\section{SHAP Feature Attribution}
+
+We compute SHAP values~\cite{lundberg2017shap} over the pooled real-data test sets to identify which features drive each model's predictions. The top features for Full \sys{} on real data are \texttt{cpu\_deviation}, \texttt{error\_rate\_ratio}, \texttt{onset\_grad}, and \texttt{event\_active}, consistent with the conceptual design: the model combines metric-deviation features with the context slice. For CatBoost on the same data, top features overlap heavily (\texttt{cpu\_deviation}, \texttt{error\_rate\_ratio}, \texttt{max\_error\_rate}), indicating both families lean on the same underlying signals. This overlap explains why context helps both families in Chapter~7---the signal is model-family-agnostic.
+
+\section{Calibration}
+
+Reliability diagrams~\cite{guo2017calibration} pre- and post-temperature-scaling show that \sys{}'s probabilistic outputs are slightly overconfident before calibration (mean absolute calibration error $\approx 0.08$) and well-calibrated after a single-parameter temperature fit (error $\approx 0.02$). This is consistent with the known pattern for modern neural classifiers. Calibration is reported for completeness and does not affect the classification-metric comparisons in this report, which use hard predictions.
 
 % ============================================================================
 % CHAPTER 6: DISCUSSION
