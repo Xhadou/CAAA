@@ -277,29 +277,43 @@ Perez~\textit{et al.}~\cite{perez2018film} introduced Feature-wise Linear Modula
 
 Grinsztajn~\textit{et al.}~\cite{grinsztajn2022tree} demonstrated at NeurIPS 2022 that tree-based models outperform deep learning on tabular data in most settings, particularly for small datasets. Gorishniy~\textit{et al.}~\cite{gorishniy2022embeddings} proposed piecewise linear embeddings for numerical features, giving MLPs axis-aligned threshold capability similar to tree splits. McElfresh~\textit{et al.}~\cite{mcelfresh2023neural} provided complementary evidence showing conditions under which neural nets can match trees. TabPFN~\cite{hollmann2024tabpfn} achieves state-of-the-art on small datasets via in-context learning (Nature 2025). TabM~\cite{gorishniy2025tabm} achieves parameter-efficient MLP ensembling outperforming GBDTs (ICLR 2025).
 
+\section{Scaling Laws and the Neural-Tree Crossover}
+
+A consistent finding across recent tabular-ML benchmarks is that gradient-boosted trees outperform neural networks on small-to-medium tabular datasets. Grinsztajn \textit{et al.}~\cite{grinsztajn2022tree} evaluated 45 medium-sized tabular tasks and attributed tree dominance to three inductive biases: neural networks are biased toward overly smooth solutions, are disproportionately hurt by uninformative features, and use rotation-invariant representations poorly suited to axis-aligned tabular decision boundaries. Shwartz-Ziv and Armon~\cite{shwartzziv2022tabular} independently corroborate this finding, showing XGBoost matches or exceeds deep tabular models (TabNet, NODE, DNF-Net) on most datasets and that ensembles of both achieve the best results.
+
+The picture changes with scale. McElfresh \textit{et al.}~\cite{mcelfresh2023neural} analyzed 176 tabular datasets and found that neural networks become competitive with GBDTs on larger datasets with specific characteristics---many numerical features, regular structure, and high sample counts---while GBDTs retain their advantage on smaller, noisier problems. This suggests a sample-size-dependent crossover regime.
+
+For microservice anomaly attribution specifically, this crossover has not been characterized. Published benchmarks (RCAEval~\cite{pham2024rcaeval}, DeathStarBench~\cite{gan2019deathstar}, TrainTicket~\cite{zhou2018trainticket}) all operate at sample sizes $n \lesssim 2{,}000$, where tree dominance is expected on prior evidence. Whether a context-aware neural architecture can overtake trees at larger $n$, and if so at what crossover point, is an open empirical question that motivates our scaling study in Chapter~6.
+
+\section{Synthetic Data Validity in ML Evaluation}
+
+When real-data benchmarks are structurally insufficient---too small, missing critical annotations, or lacking controlled difficulty---synthetic data is a principled alternative, provided three conditions are met. First, the generative process must be fully documented so readers can audit its assumptions~\cite{jordon2022synthetic}. Second, leakage controls must be explicit, particularly the failure mode of shortcut learning~\cite{geirhos2020shortcut} where models exploit spurious correlations (for example, metadata that co-varies with the label) instead of learning the intended decision boundary. Third, where real-data and synthetic results coexist, they should corroborate directionally: a synthetic-only effect that contradicts real-data trends is evidence of a modeling artifact, not a scientific finding~\cite{nikolenko2021synthetic}.
+
+Our methodology satisfies all three conditions. Chapter~4 documents the full generative pipeline, specifies five independent anti-leakage safeguards, and shows that the universal-context contribution observed on synthetic data at $n = 40{,}000$ is directionally confirmed on real RCAEval traces (CatBoost $+$ context vs.\ CatBoost: $+0.29$ pp F1 pooled across nine system/dataset cells). The magnitudes differ---synthetic gains are larger because the context signal is cleaner---but the sign and ranking across model families are preserved.
+
 \section{Research Gap Analysis}
 
-Table~\ref{tab:gap} summarizes the landscape. Our survey reveals that \textbf{no prior work uses operational context as model features}; all operate on raw telemetry. Furthermore, no paper discusses the risk of context metadata becoming a label proxy---the shortcut learning problem is entirely absent from the AIOps literature. \sys{} is the first to address both the context integration gap and the methodological gap in evaluating context-aware systems.
+Table~\ref{tab:gap} summarizes the landscape. Our survey reveals that \textbf{no prior work uses operational context as model features}; all operate on raw telemetry. Furthermore, no paper discusses the risk of context metadata becoming a label proxy---the shortcut learning problem is entirely absent from the AIOps literature. Equally, no prior microservice-attribution work has characterized the neural-over-tree crossover as a function of sample size. \sys{} is the first to address the context-integration gap, the methodological gap in evaluating context-aware systems, and the scaling gap simultaneously.
 
 \begin{table}[h]
     \centering
-    \caption{Capabilities of Existing Methods vs. \sys{}}
+    \caption{Capabilities of Existing Methods vs.\ \sys{}}
     \label{tab:gap}
-    \begin{tabular}{lcccccc}
+    \begin{tabular}{lccccccc}
         \toprule
-        \textbf{Method} & \textbf{Met} & \textbf{MM} & \textbf{Ctx} & \textbf{FiLM} & \textbf{Attr} & \textbf{FPR} \\
+        \textbf{Method} & \textbf{Met} & \textbf{MM} & \textbf{Ctx} & \textbf{FiLM} & \textbf{Attr} & \textbf{FPR} & \textbf{Univ} \\
         \midrule
-        Anomaly Trans.~\cite{xu2022anomalytransformer} & $\checkmark$ & -- & -- & -- & -- & -- \\
-        DCdetector~\cite{yang2023dcdetector} & $\checkmark$ & -- & -- & -- & -- & -- \\
-        BARO~\cite{chen2024baro} & $\checkmark$ & -- & -- & -- & -- & -- \\
-        DiagFusion~\cite{zhang2023diagfusion} & $\checkmark$ & $\checkmark$ & -- & -- & -- & -- \\
-        Lumos~\cite{lumos2020} & $\checkmark$ & -- & A/B & -- & -- & $\checkmark$ \\
-        \sys{} (Ours) & $\checkmark$ & -- & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ \\
+        Anomaly Trans.~\cite{xu2022anomalytransformer} & $\checkmark$ & -- & -- & -- & -- & -- & -- \\
+        DCdetector~\cite{yang2023dcdetector} & $\checkmark$ & -- & -- & -- & -- & -- & -- \\
+        BARO~\cite{chen2024baro} & $\checkmark$ & -- & -- & -- & -- & -- & -- \\
+        DiagFusion~\cite{zhang2023diagfusion} & $\checkmark$ & $\checkmark$ & -- & -- & -- & -- & -- \\
+        Lumos~\cite{lumos2020} & $\checkmark$ & -- & A/B & -- & -- & $\checkmark$ & -- \\
+        \sys{} (Ours) & $\checkmark$ & -- & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ & $\checkmark$ \\
         \bottomrule
     \end{tabular}
 
     \smallskip
-    \footnotesize Met=Metrics, MM=Multimodal, Ctx=Context, Attr=Attribution, FPR=FP Reduction
+    \footnotesize Met=Metrics, MM=Multimodal, Ctx=Context, Attr=Attribution, FPR=FP Reduction, Univ=Universal (demonstrated across model families)
 \end{table}
 
 
