@@ -957,7 +957,7 @@ At the headline scale ($n = 40{,}000$ hard samples, 10 seeds), we compare each m
         width=0.80\textwidth,
         height=7cm,
         xlabel={$\Delta$F1 (percentage points) from adding context},
-        symbolic y coords={RandomForest, CatBoost, XGBoost, LightGBM, CAAA},
+        symbolic y coords={RandomForest,CatBoost,XGBoost,LightGBM,CAAA},
         ytick=data,
         xmin=0, xmax=2.8,
         nodes near coords,
@@ -969,14 +969,14 @@ At the headline scale ($n = 40{,}000$ hard samples, 10 seeds), we compare each m
         grid style={dashed, gray!30},
     ]
     \addplot[fill=blue!30, draw=blue!70!black] coordinates {
-        (1.28, CAAA)
-        (1.58, LightGBM)
-        (1.60, XGBoost)
-        (1.70, CatBoost)
-        (2.30, RandomForest)
+        (1.28,CAAA)
+        (1.58,LightGBM)
+        (1.60,XGBoost)
+        (1.70,CatBoost)
+        (2.30,RandomForest)
     };
-    \draw[thick, red!70!black, dashed] (axis cs:0.21, CAAA) -- (axis cs:0.21, RandomForest);
-    \node[right, font=\scriptsize, text=red!70!black] at (axis cs:0.23, LightGBM) {Neural--tree gap (0.21 pp)};
+    \draw[thick, red!70!black, dashed] (axis cs:0.21,CAAA) -- (axis cs:0.21,RandomForest);
+    \node[right, font=\scriptsize, text=red!70!black] at (axis cs:0.23,LightGBM) {Neural--tree gap (0.21 pp)};
     \end{axis}
     \end{tikzpicture}
     \caption{Context contribution per model family at $n = 40{,}000$ hard samples. The same five-dimensional context slice yields $+1.28$ to $+2.30$ percentage points of F1 across neural and tree architectures. The dashed red line marks the best neural-over-tree architectural gap from Chapter~6, which the context contribution exceeds by $6$--$10\times$.}
