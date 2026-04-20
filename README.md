@@ -361,7 +361,8 @@ CAAA/
 ├── scripts/
 │   ├── demo.py                      # Quick demonstration (small dataset)
 │   ├── train.py                     # Full training pipeline with baselines
-│   └── ablation.py                  # Ablation study framework
+│   ├── ablation.py                  # Ablation study framework
+│   └── scaling_study.py             # Data-size scaling study (CAAA vs tree baselines)
 ├── src/
 │   ├── main.py                      # Unified pipeline entry point
 │   ├── data_loader/
@@ -386,9 +387,10 @@ CAAA/
 │   ├── training/
 │   │   ├── losses.py              # Context Consistency Loss (novel)
 │   │   └── trainer.py             # PyTorch training harness with early stopping
-│   └── evaluation/
-│       ├── metrics.py             # Evaluation metrics & FP reduction measurement
-│       └── visualization.py       # Confusion matrices, feature importance plots
+│   ├── evaluation/
+│   │   ├── metrics.py             # Evaluation metrics & FP reduction measurement
+│   │   └── visualization.py       # Confusion matrices, feature importance plots
+│   └── utils/                     # Shared utility helpers
 ├── tests/
 │   ├── test_data_loader.py        # Data generation tests
 │   ├── test_features.py           # Feature extraction tests

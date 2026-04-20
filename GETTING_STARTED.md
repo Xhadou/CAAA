@@ -314,6 +314,16 @@ python scripts/ablation.py \
 
 **Expected runtime:** 30–90 minutes depending on your hardware.
 
+### Scaling study
+
+To see how CAAA and tree baselines perform as training data size increases:
+
+```bash
+python scripts/scaling_study.py
+```
+
+This runs the full CAAA pipeline and key baselines across a range of dataset sizes and plots performance curves.
+
 ### Ablation Variants
 
 The ablation evaluates these 14 variants:

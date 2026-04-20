@@ -52,6 +52,11 @@ graphify-out/
 # Reference/external paper archive (not project source)
 final papers/
 
+# Research exploration folders and report (not part of reproducible codebase)
+research_*/
+docs/
+report/
+
 # LaTeX build artefacts
 *.aux
 *.log
