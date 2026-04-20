@@ -383,6 +383,8 @@ The system extracts a 44-dimensional feature vector organized into six groups:
 
 The full 44-dim feature vector (including context dims 12--16) passes through the Feature Encoder so the encoder learns joint representations capturing interactions between context and metric features. Context features are \textit{also} sliced out separately and fed into the Context Integration Module for explicit FiLM conditioning and confidence gating. This dual processing ensures the encoder builds a context-entangled hidden representation while the gating module controls how much the explicit context signal modulates the final prediction.
 
+\textbf{Unified taxonomy across synthetic and real data.} The same 44-dimensional feature vector is extracted from both synthetic fault cases and real RCAEval traces, and the 5-dimensional context slice (dimensions 12--16) has identical semantics in both sources: \texttt{event\_active} (binary flag for a scheduled operational event), \texttt{event\_expected\_impact} (scalar load delta), \texttt{deploy\_recent} (binary flag for a recent deployment), and two cyclic time-of-day encodings (\texttt{tod\_sin}, \texttt{tod\_cos}). Tree baselines consume the 44-dimensional vector directly; \sys{} additionally slices out the 5-dimensional context for FiLM conditioning. ``No-context'' variants drop dimensions 12--16, yielding a 39-dimensional input. This uniformity---identical feature semantics, identical dimensionality, a single slice difference---is what makes the per-model-family context-contribution analysis in Chapter~7 a fair comparison.
+
 \section{Piecewise Linear Embeddings}
 
 Each scalar feature is transformed into an 8-bin encoding via quantile boundaries from training data~\cite{gorishniy2022embeddings}:
@@ -496,6 +498,11 @@ Algorithm~\ref{alg:caaa} presents the complete \sys{} inference procedure.
 
 AdamW optimizer with learning rate $10^{-3}$, weight decay $10^{-3}$; ReduceLROnPlateau scheduler (factor 0.5, patience 5); gradient clipping (max norm 1.0); early stopping (patience 10). Stratified 60/20/20 train/val/test split. Feature-group dropout: context features (dims 12--16) zeroed with 30\% probability during training. Neural models use NaNSafeScaler normalization; tree baselines operate on raw features.
 
+\section{Design Rationale for Universal Comparability}
+
+All ten model variants evaluated in Chapters~5--7 (Full \sys{}, \sys{} no-context, CatBoost~$\pm$ context, XGBoost~$\pm$ context, LightGBM~$\pm$ context, RandomForest~$\pm$ context) operate on the same 44-dimensional feature vector. The only architectural difference between \sys{} and the tree baselines is how the 5-dimensional context slice is integrated: \sys{} applies FiLM-conditioned modulation followed by a confidence gate~\cite{perez2018film,oreshkin2018tadam}, while tree baselines concatenate the slice into the feature vector and rely on implicit feature selection during split finding. Both paths consume the same information.
+
+This design choice isolates the context-integration \emph{mechanism} (neural FiLM vs.\ tree-native concatenation) from any confounding feature-set differences. When we report that adding context yields $+1.28$ pp for \sys{}, $+1.70$ pp for CatBoost, $+1.60$ pp for XGBoost, $+1.58$ pp for LightGBM, and $+2.30$ pp for RandomForest in Chapter~7, the identical input slice is what licenses the per-family contribution comparison. Any observed differences in context gain reflect how each architecture incorporates the signal, not what signal it sees.
 
 % ============================================================================
 % CHAPTER 4: EVALUATION METHODOLOGY
