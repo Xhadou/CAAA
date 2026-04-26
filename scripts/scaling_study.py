@@ -255,10 +255,16 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--difficulty", choices=["default", "hard"],
+    parser.add_argument("--difficulty", choices=["default", "hard", "very_hard"],
                         default="default",
-                        help="Task difficulty. 'hard' lowers the ceiling so "
-                             "architectural differences become visible.")
+                        help="Task difficulty. 'hard' lowers the ceiling to "
+                             "~95%; 'very_hard' to ~88-92% to expose "
+                             "architectural differences that 'hard' 40K "
+                             "saturation still masks.")
+    parser.add_argument("--log-per-seed", action="store_true",
+                        help="In addition to the aggregate CSV, dump per-seed "
+                             "F1 arrays to JSON to enable Wilcoxon signed-rank "
+                             "and Cliff's delta statistics.")
     args = parser.parse_args()
 
     # Print config
@@ -297,7 +303,8 @@ def main():
     # Separate files for default vs hard difficulty so results don't overwrite.
     csv_dir = "outputs/results"
     os.makedirs(csv_dir, exist_ok=True)
-    csv_name = "scaling_study.csv" if args.difficulty == "default" else "scaling_study_hard.csv"
+    _DIFF_SUFFIX = {"default": "", "hard": "_hard", "very_hard": "_very_hard"}[args.difficulty]
+    csv_name = f"scaling_study{_DIFF_SUFFIX}.csv"
     csv_path = os.path.join(csv_dir, csv_name)
 
     existing_rows = {}
@@ -314,6 +321,22 @@ def main():
                 for variant, metrics in results.items()}
         for total, results in all_results.items()
     }
+
+    if args.log_per_seed:
+        import json
+        json_name = f"scaling_per_seed{_DIFF_SUFFIX}.json"
+        json_path = os.path.join(csv_dir, json_name)
+        existing_per_seed = {}
+        if os.path.exists(json_path):
+            with open(json_path) as jf:
+                existing_per_seed = json.load(jf)
+        for total, per_variant in raw_results.items():
+            existing_per_seed.setdefault(str(total), {})
+            for variant, f1_list in per_variant.items():
+                existing_per_seed[str(total)][variant] = f1_list
+        with open(json_path, "w") as jf:
+            json.dump(existing_per_seed, jf, indent=2)
+        print(f"  Per-seed F1 arrays saved to {json_path}")
 
     # Overlay new results on top of existing (new results win for duplicate keys)
     for total, results in all_results.items():
@@ -384,7 +407,7 @@ def main():
 
         ax.set_xlabel("Total training samples", fontsize=13)
         ax.set_ylabel("F1 Score", fontsize=13)
-        title_suffix = "Hard Task" if args.difficulty == "hard" else "Default Task"
+        title_suffix = {"default": "Default Task", "hard": "Hard Task", "very_hard": "Very-Hard Task"}[args.difficulty]
         ax.set_title(
             f"Scaling Study ({title_suffix}): CAAA vs Trees",
             fontsize=14, fontweight="bold",
@@ -393,7 +416,7 @@ def main():
         ax.grid(True, alpha=0.3)
         ax.legend(loc="lower right", fontsize=11)
         # Wider y-range for hard mode since ceiling is lower
-        ax.set_ylim([0.5, 1.0] if args.difficulty == "hard" else [0.86, 1.0])
+        ax.set_ylim([0.5, 1.0] if args.difficulty in ("hard", "very_hard") else [0.86, 1.0])
 
         # Annotate crossover point if CAAA exceeds CatBoost (with context)
         for s in sizes:
@@ -407,7 +430,7 @@ def main():
                 break
 
         plt.tight_layout()
-        plot_name = "scaling_curve.png" if args.difficulty == "default" else "scaling_curve_hard.png"
+        plot_name = f"scaling_curve{_DIFF_SUFFIX}.png"
         plot_path = os.path.join(csv_dir, plot_name)
         plt.savefig(plot_path, dpi=150, bbox_inches="tight")
         print(f"  Plot saved to {plot_path}")
@@ -452,7 +475,7 @@ def main():
                         f"+{delta:.2f}pp" if delta >= 0 else f"{delta:.2f}pp",
                         ha="center", fontsize=11, fontweight="bold")
             plt.tight_layout()
-            ctx_name = "context_contribution.png" if args.difficulty == "default" else "context_contribution_hard.png"
+            ctx_name = f"context_contribution{_DIFF_SUFFIX}.png"
             ctx_plot_path = os.path.join(csv_dir, ctx_name)
             plt.savefig(ctx_plot_path, dpi=150, bbox_inches="tight")
             print(f"  Context contribution plot saved to {ctx_plot_path}")

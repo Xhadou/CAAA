@@ -43,7 +43,11 @@ def generate_combined_dataset(
               normal severity factors (0.05/0.3/1.0). Achieves ~97% F1 ceiling.
             - ``"hard"``: 60/25/15 severity mix with reduced severity factors
               (0.02/0.15/0.7) and higher context noise. Lowers ceiling to
-              ~85% so model architecture differences become visible.
+              ~95% so model architecture differences become visible.
+            - ``"very_hard"``: 70/20/10 severity mix with further-reduced
+              severity factors (0.01/0.10/0.50) and context noise 0.60.
+              Target ceiling ~88-92% to expose differences that "hard"
+              40K saturation still masks.
 
     Returns:
         Tuple of (fault_cases, load_cases).
@@ -52,14 +56,23 @@ def generate_combined_dataset(
         systems = ["online-boutique"]
 
     # Difficulty profile controls the severity distribution, severity factors
-    # scaling, and context-noise rate. "hard" mode intentionally lowers the
-    # Bayes-optimal ceiling so that architectural differences (neural vs
+    # scaling, and context-noise rate. Harder modes intentionally lower the
+    # empirical saturation plateau so that architectural differences (neural vs
     # tree, context vs no context) become visible.
-    if difficulty == "hard":
+    if difficulty == "very_hard":
+        # Harshest principled setting: maximises task difficulty to test the
+        # H2 architectural-crossover hypothesis at its most extreme. Predicted
+        # plateau ~82-87% F1. We commit to reporting this outcome regardless
+        # of what falls out (no parameter search beyond this).
+        _SEVERITY_DIST = [("low", 0.85), ("medium", 0.12), ("high", 0.03)]
+        _severity_factors = {"low": 0.003, "medium": 0.03, "high": 0.20}
+        _fake_context_rate = 0.75
+        _empty_context_rate = 0.75
+    elif difficulty == "hard":
         _SEVERITY_DIST = [("low", 0.60), ("medium", 0.25), ("high", 0.15)]
         _severity_factors = {"low": 0.02, "medium": 0.15, "high": 0.7}
-        _fake_context_rate = 0.50  # up from 0.30
-        _empty_context_rate = 0.50  # up from 0.30
+        _fake_context_rate = 0.50
+        _empty_context_rate = 0.50
     else:
         _SEVERITY_DIST = [("low", 0.35), ("medium", 0.35), ("high", 0.30)]
         _severity_factors = None  # use class default
