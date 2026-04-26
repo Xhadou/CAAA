@@ -227,7 +227,7 @@ python -m src.main --n-fault 50 --n-load 50 --model rule_based
 
 ### Ablation Study
 
-The ablation script evaluates 14 model variants systematically to answer the research questions:
+The ablation script evaluates 20 model variants systematically to answer the research questions. Two variants are optional: `CAAA (pretrained)` is active with `--pretrain` on RCAEval runs, and `CAAA (temporal)` is active with `--temporal`.
 
 ```bash
 # Standard ablation (5 runs per variant)
@@ -256,7 +256,7 @@ python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5 --inc
 | 4 | CAAA (full penalty) | Original aggressive penalty (for comparison) |
 | 5 | No Context Features | Ablate context inputs |
 | 6 | No Context Loss | Standard cross-entropy only |
-| 7 | No Behavioral Features | Ablate behavioral inputs |
+| 7 | No Behavioral | Ablate behavioral inputs |
 | 8 | Context Only | Context features alone |
 | 9 | Statistical Only | Statistical features alone |
 | 10 | Stat + Service-Level | Combined traditional features |
@@ -264,9 +264,32 @@ python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5 --inc
 | 12 | XGBoost | XGBoost baseline |
 | 13 | LightGBM | LightGBM baseline |
 | 14 | CatBoost | CatBoost baseline |
-| 15 | CAAA+CatBoost Hybrid | FiLM embeddings + raw features into CatBoost |
-| 16 | Rule-Based | Heuristic rules |
-| 17 | Naive | No-context naive classifier |
+| 15 | CatBoost (with context) | Context-enabled tree upper bound |
+| 16 | CAAA+CatBoost Hybrid | FiLM embeddings + raw features into CatBoost |
+| 17 | CAAA (pretrained) | Synthetic pretrain + real-data fine-tuning (`--pretrain`) |
+| 18 | CAAA (temporal) | Temporal encoder branch (`--temporal`) |
+| 19 | Rule-Based | Heuristic rules |
+| 20 | Naive | No-context naive classifier |
+
+### Scaling Study
+
+The scaling study compares neural and tree models across data sizes and difficulty levels:
+
+```bash
+# Default difficulty
+python scripts/scaling_study.py
+
+# Moderate difficulty (old hard profile)
+python scripts/scaling_study.py --difficulty moderate
+
+# Hard difficulty (highest-difficulty profile) + per-seed logs for significance tests
+python scripts/scaling_study.py --difficulty hard --log-per-seed
+```
+
+Generated files are written to `outputs/results/` with suffixes by difficulty:
+- `scaling_study.csv`, `scaling_curve.png`, `context_contribution.png`, `scaling_per_seed.json`
+- `scaling_study_moderate.csv`, `scaling_curve_moderate.png`, `context_contribution_moderate.png`, `scaling_per_seed_moderate.json`
+- `scaling_study_hard.csv`, `scaling_curve_hard.png`, `context_contribution_hard.png`, `scaling_per_seed_hard.json`
 
 ### Using RCAEval Real-World Data
 
@@ -302,24 +325,32 @@ Experiments write results to the `outputs/` directory (gitignored):
 
 ```
 outputs/
-├── results/
-│   ├── caaa_model.pt                          # Trained CAAA model checkpoint
-│   ├── ablation_results_synthetic.csv         # Synthetic ablation metrics
-│   ├── ablation_results_RE1_online-boutique.csv  # Per-system RCAEval results
-│   ├── ablation_results_RE1_sock-shop.csv
-│   ├── ablation_results_combined.csv          # Macro-averaged across all systems
-│   ├── shap_synthetic/                        # SHAP plots for synthetic data
-│   │   ├── shap_full_caaa.png
-│   │   └── shap_baseline_rf.png
-│   └── calibration_synthetic/                 # Calibration reliability diagrams
-│   │   └── shap_*_by_fault_type.png # Per-fault-type SHAP plots
-│   └── calibration/
-│       ├── reliability_uncalibrated.png  # Before temperature scaling
-│       └── reliability_calibrated.png    # After temperature scaling
-└── models/
-    └── final/
-        └── caaa_model.pt            # Final model checkpoint
+└── results/
+    ├── ablation_results_synthetic.csv
+    ├── ablation_results_RE1_online-boutique.csv
+    ├── ablation_results_RE1_sock-shop.csv
+    ├── ablation_results_RE1_train-ticket.csv
+    ├── ablation_results_combined.csv
+    ├── ablation_results_all_pooled.csv
+    ├── scaling_study.csv
+    ├── scaling_study_moderate.csv
+    ├── scaling_study_hard.csv
+    ├── scaling_curve.png
+    ├── scaling_curve_moderate.png
+    ├── scaling_curve_hard.png
+    ├── context_contribution.png
+    ├── context_contribution_moderate.png
+    ├── context_contribution_hard.png
+    ├── scaling_per_seed.json
+    ├── scaling_per_seed_moderate.json
+    ├── scaling_per_seed_hard.json
+    ├── shap_synthetic/
+    ├── calibration_synthetic/
+    ├── shap_RE*/
+    └── calibration_RE*/
 ```
+
+Model checkpoints are written under `models/final/` and pretraining checkpoints under `models/pretrained/`.
 
 ### Metrics Reported
 
@@ -339,7 +370,7 @@ Every experiment prints the following metrics to the console and logs them for a
 
 ### Interpreting Ablation Results
 
-The ablation CSV (`outputs/results/ablation_results.csv`) contains mean ± standard deviation for each metric across all runs. Compare variants to answer the research questions:
+The ablation CSVs (for example `outputs/results/ablation_results_synthetic.csv`, `outputs/results/ablation_results_RE1_online-boutique.csv`, and `outputs/results/ablation_results_combined.csv`) contain mean ± standard deviation for each metric across all runs. Compare variants to answer the research questions:
 
 - **RQ1 (context value)**: Compare "Full CAAA" vs. "No Context Features" and "Naive" rows
 - **RQ2 (loss function)**: Compare "Full CAAA" vs. "No Context Loss" rows

@@ -60,10 +60,11 @@ def run_size_point(
         epochs: Training epochs for CAAA.
         batch_size: Training batch size.
         lr: Learning rate.
-        difficulty: Task difficulty ("default" or "hard"). "hard" lowers the
-            Bayes-optimal ceiling by using more disguised faults and smaller
-            severity factors — reveals architectural differences otherwise
-            masked by task saturation.
+        difficulty: Task difficulty ("default", "moderate", or "hard").
+            "moderate" lowers the Bayes-optimal ceiling by using more
+            disguised faults and smaller severity factors; "hard" pushes
+            further to expose architectural differences still masked under
+            moderate saturation.
 
     Returns:
         Dictionary of ``{variant: {metric: [values]}}``.
@@ -255,11 +256,11 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--difficulty", choices=["default", "hard", "very_hard"],
+    parser.add_argument("--difficulty", choices=["default", "moderate", "hard"],
                         default="default",
-                        help="Task difficulty. 'hard' lowers the ceiling to "
-                             "~95%; 'very_hard' to ~88-92% to expose "
-                             "architectural differences that 'hard' 40K "
+                        help="Task difficulty. 'moderate' lowers the ceiling to "
+                             "~95%; 'hard' to ~88-92% to expose "
+                             "architectural differences that moderate 40K "
                              "saturation still masks.")
     parser.add_argument("--log-per-seed", action="store_true",
                         help="In addition to the aggregate CSV, dump per-seed "
@@ -300,10 +301,10 @@ def main():
             print(f"    {variant:<30s} F1: {np.mean(f1s):.3f} ± {np.std(f1s):.3f}")
 
     # Save CSV — merge with existing results if present (keep new for duplicate sizes).
-    # Separate files for default vs hard difficulty so results don't overwrite.
+    # Separate files for each difficulty so results don't overwrite.
     csv_dir = "outputs/results"
     os.makedirs(csv_dir, exist_ok=True)
-    _DIFF_SUFFIX = {"default": "", "hard": "_hard", "very_hard": "_very_hard"}[args.difficulty]
+    _DIFF_SUFFIX = {"default": "", "moderate": "_moderate", "hard": "_hard"}[args.difficulty]
     csv_name = f"scaling_study{_DIFF_SUFFIX}.csv"
     csv_path = os.path.join(csv_dir, csv_name)
 
@@ -407,7 +408,7 @@ def main():
 
         ax.set_xlabel("Total training samples", fontsize=13)
         ax.set_ylabel("F1 Score", fontsize=13)
-        title_suffix = {"default": "Default Task", "hard": "Hard Task", "very_hard": "Very-Hard Task"}[args.difficulty]
+        title_suffix = {"default": "Default Task", "moderate": "Moderate Task", "hard": "Hard Task"}[args.difficulty]
         ax.set_title(
             f"Scaling Study ({title_suffix}): CAAA vs Trees",
             fontsize=14, fontweight="bold",
@@ -415,8 +416,8 @@ def main():
         ax.set_xscale("log")
         ax.grid(True, alpha=0.3)
         ax.legend(loc="lower right", fontsize=11)
-        # Wider y-range for hard mode since ceiling is lower
-        ax.set_ylim([0.5, 1.0] if args.difficulty in ("hard", "very_hard") else [0.86, 1.0])
+        # Wider y-range for non-default modes since ceilings are lower.
+        ax.set_ylim([0.5, 1.0] if args.difficulty in ("moderate", "hard") else [0.86, 1.0])
 
         # Annotate crossover point if CAAA exceeds CatBoost (with context)
         for s in sizes:

@@ -261,7 +261,7 @@ See `configs/config.yaml` for all tunable parameters.
 
 ## 7. Running Ablation Studies
 
-The ablation study is the most important experiment — it systematically evaluates 14 model variants to answer the research questions.
+The ablation study is the most important experiment — it systematically evaluates 20 model variants to answer the research questions. Two are optional: `CAAA (pretrained)` requires `--pretrain` on RCAEval runs, and `CAAA (temporal)` requires `--temporal`.
 
 ### Basic ablation
 
@@ -269,7 +269,7 @@ The ablation study is the most important experiment — it systematically evalua
 python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5
 ```
 
-This trains each of the 14 variants 5 times with different random seeds and reports mean ± standard deviation.
+This trains each of the 20 variants 5 times with different random seeds and reports mean ± standard deviation.
 
 ### With SHAP feature importance
 
@@ -277,7 +277,7 @@ This trains each of the 14 variants 5 times with different random seeds and repo
 python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5 --shap
 ```
 
-Generates SHAP beeswarm plots showing which features matter most for each model variant. Plots are saved to `outputs/figures/shap/`.
+Generates SHAP beeswarm plots showing which features matter most for each model variant. Plots are saved under `outputs/results/shap_*` directories.
 
 ### With calibration analysis
 
@@ -285,7 +285,7 @@ Generates SHAP beeswarm plots showing which features matter most for each model 
 python scripts/ablation.py --n-fault 50 --n-load 50 --epochs 30 --n-runs 5 --calibration
 ```
 
-Generates reliability diagrams before and after temperature scaling. Saved to `outputs/figures/calibration/`.
+Generates reliability diagrams before and after temperature scaling. Saved under `outputs/results/calibration_*` directories.
 
 ### With cross-validation
 
@@ -319,31 +319,52 @@ python scripts/ablation.py \
 To see how CAAA and tree baselines perform as training data size increases:
 
 ```bash
+# Default difficulty
 python scripts/scaling_study.py
+
+# Moderate difficulty (old hard profile)
+python scripts/scaling_study.py --difficulty moderate
+
+# Hard difficulty (highest-difficulty profile)
+python scripts/scaling_study.py --difficulty hard
+
+# Dump per-seed arrays for Wilcoxon/Cliff's delta tests
+python scripts/scaling_study.py --difficulty hard --log-per-seed
 ```
 
 This runs the full CAAA pipeline and key baselines across a range of dataset sizes and plots performance curves.
 
+Scaling outputs are written to `outputs/results/` with difficulty suffixes:
+- default: `scaling_study.csv`, `scaling_curve.png`, `context_contribution.png`, `scaling_per_seed.json`
+- moderate: `scaling_study_moderate.csv`, `scaling_curve_moderate.png`, `context_contribution_moderate.png`, `scaling_per_seed_moderate.json`
+- hard: `scaling_study_hard.csv`, `scaling_curve_hard.png`, `context_contribution_hard.png`, `scaling_per_seed_hard.json`
+
 ### Ablation Variants
 
-The ablation evaluates these 14 variants:
+The ablation evaluates these 20 variants:
 
 | # | Variant | What It Tests |
 |---|---------|--------------|
 | 1 | Full CAAA | Complete proposed model (all features + context loss) |
 | 2 | CAAA + Contrastive | Adds contrastive learning objective |
-| 3 | No Context Features | Removes the 5 context features (dims 12–16) |
-| 4 | No Context Loss | Uses standard cross-entropy instead of Context Consistency Loss |
-| 5 | No Behavioral Features | Removes behavioral features (dims 6–11) |
-| 6 | Context Only | Uses only context features |
-| 7 | Statistical Only | Uses only statistical features |
-| 8 | Stat + Service-Level | Uses statistical + service-level features |
-| 9 | Baseline RF | Random Forest on all features |
-| 10 | XGBoost | XGBoost on all features |
-| 11 | LightGBM | LightGBM on all features |
-| 12 | CatBoost | CatBoost on all features |
-| 13 | Rule-Based | Hand-crafted heuristic rules |
-| 14 | Naive | No-context baseline (always predicts FAULT) |
+| 3 | CAAA (clamp loss) | Context consistency with clamp-only penalty |
+| 4 | CAAA (full penalty) | Aggressive unknown-context penalty |
+| 5 | No Context Features | Removes the 5 context features (dims 12–16) |
+| 6 | No Context Loss | Uses standard cross-entropy instead of Context Consistency Loss |
+| 7 | No Behavioral | Removes behavioral features (dims 6–11) |
+| 8 | Context Only | Uses only context features |
+| 9 | Statistical Only | Uses only statistical features |
+| 10 | Stat + Service-Level | Uses statistical + service-level features |
+| 11 | Baseline RF | Random Forest with context columns removed |
+| 12 | XGBoost | XGBoost with context columns removed |
+| 13 | LightGBM | LightGBM with context columns removed |
+| 14 | CatBoost | CatBoost with context columns removed |
+| 15 | CatBoost (with context) | Context-enabled tree upper-bound reference |
+| 16 | CAAA+CatBoost Hybrid | CAAA embeddings + raw features into CatBoost |
+| 17 | CAAA (pretrained) | Synthetic pretrain then RCAEval fine-tune (`--pretrain`) |
+| 18 | CAAA (temporal) | Temporal encoder branch (`--temporal`) |
+| 19 | Rule-Based | Hand-crafted heuristic rules |
+| 20 | Naive | No-context baseline (always predicts FAULT) |
 
 ---
 
@@ -471,26 +492,38 @@ After running experiments, results are saved under the `outputs/` directory:
 
 ```
 outputs/
-├── results/
-│   ├── caaa_model.pt              # Trained model checkpoint
-│   └── ablation_results.csv       # Ablation metrics table
-└── figures/
-    ├── shap/
-    │   ├── shap_full_caaa.png     # Feature importance (CAAA)
-    │   ├── shap_baseline_rf.png   # Feature importance (RF)
-    │   └── shap_*_by_fault_type.png
-    └── calibration/
-        ├── reliability_uncalibrated.png
-        └── reliability_calibrated.png
+└── results/
+    ├── ablation_results_synthetic.csv
+    ├── ablation_results_RE1_online-boutique.csv
+    ├── ablation_results_RE1_sock-shop.csv
+    ├── ablation_results_RE1_train-ticket.csv
+    ├── ablation_results_combined.csv
+    ├── ablation_results_all_pooled.csv
+    ├── scaling_study.csv
+    ├── scaling_study_moderate.csv
+    ├── scaling_study_hard.csv
+    ├── scaling_curve.png
+    ├── scaling_curve_moderate.png
+    ├── scaling_curve_hard.png
+    ├── context_contribution.png
+    ├── context_contribution_moderate.png
+    ├── context_contribution_hard.png
+    ├── scaling_per_seed.json
+    ├── scaling_per_seed_moderate.json
+    ├── scaling_per_seed_hard.json
+    ├── shap_synthetic/
+    ├── calibration_synthetic/
+    ├── shap_RE*/
+    └── calibration_RE*/
 ```
 
 ### Reading ablation results
 
-Open `outputs/results/ablation_results.csv` in a spreadsheet or with Python:
+Open `outputs/results/ablation_results_synthetic.csv` in a spreadsheet or with Python:
 
 ```python
 import pandas as pd
-df = pd.read_csv("outputs/results/ablation_results.csv")
+df = pd.read_csv("outputs/results/ablation_results_synthetic.csv")
 print(df.to_string())
 ```
 
@@ -510,7 +543,7 @@ SHAP (SHapley Additive exPlanations) plots show how much each feature contribute
 - **Blue dots on the right** = low feature values push toward FAULT prediction
 - Features at the top are most influential
 
-Look for context features (`event_active`, `time_seasonality`, etc.) appearing high in the ranking — this confirms context integration is valuable.
+Look for context-related features (the context feature block at dims 12-16) appearing high in the ranking — this confirms context integration is valuable.
 
 ### Interpreting calibration plots
 

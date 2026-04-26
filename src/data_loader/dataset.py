@@ -41,12 +41,12 @@ def generate_combined_dataset(
         difficulty: Task difficulty level. One of:
             - ``"default"``: Standard 35/35/30 low/medium/high severity mix with
               normal severity factors (0.05/0.3/1.0). Achieves ~97% F1 ceiling.
-            - ``"hard"``: 60/25/15 severity mix with reduced severity factors
+                        - ``"moderate"``: 60/25/15 severity mix with reduced severity factors
               (0.02/0.15/0.7) and higher context noise. Lowers ceiling to
               ~95% so model architecture differences become visible.
-            - ``"very_hard"``: 70/20/10 severity mix with further-reduced
+                        - ``"hard"``: 70/20/10 severity mix with further-reduced
               severity factors (0.01/0.10/0.50) and context noise 0.60.
-              Target ceiling ~88-92% to expose differences that "hard"
+                            Target ceiling ~88-92% to expose differences that "moderate"
               40K saturation still masks.
 
     Returns:
@@ -59,7 +59,7 @@ def generate_combined_dataset(
     # scaling, and context-noise rate. Harder modes intentionally lower the
     # empirical saturation plateau so that architectural differences (neural vs
     # tree, context vs no context) become visible.
-    if difficulty == "very_hard":
+    if difficulty == "hard":
         # Harshest principled setting: maximises task difficulty to test the
         # H2 architectural-crossover hypothesis at its most extreme. Predicted
         # plateau ~82-87% F1. We commit to reporting this outcome regardless
@@ -68,7 +68,7 @@ def generate_combined_dataset(
         _severity_factors = {"low": 0.003, "medium": 0.03, "high": 0.20}
         _fake_context_rate = 0.75
         _empty_context_rate = 0.75
-    elif difficulty == "hard":
+    elif difficulty == "moderate":
         _SEVERITY_DIST = [("low", 0.60), ("medium", 0.25), ("high", 0.15)]
         _severity_factors = {"low": 0.02, "medium": 0.15, "high": 0.7}
         _fake_context_rate = 0.50
@@ -99,13 +99,13 @@ def generate_combined_dataset(
         roll = rng.random()
         if roll < _SEVERITY_DIST[0][1]:
             severity = "low"
-            difficulty = "hard"
+            case_difficulty = "hard"
         elif roll < _SEVERITY_DIST[0][1] + _SEVERITY_DIST[1][1]:
             severity = "medium"
-            difficulty = "medium"
+            case_difficulty = "medium"
         else:
             severity = "high"
-            difficulty = "easy"
+            case_difficulty = "easy"
 
         if severity == "low":
             # Disguised fault: mimics load spike pattern, empty context
@@ -122,7 +122,7 @@ def generate_combined_dataset(
                 fault_context["recent_deployment"] = True
             # Some fault cases get a fake context with event_type to prevent
             # event_active from being a perfect proxy for the label. Rate is
-            # controlled by difficulty ("hard" mode raises it to 50%).
+            # controlled by difficulty mode (50% for moderate, 75% for hard).
             if rng.random() < _fake_context_rate:
                 fake_event = str(rng.choice([
                     "flash_sale", "marketing_campaign", "scheduled_batch",
@@ -150,7 +150,7 @@ def generate_combined_dataset(
                 context=fault_context,
                 fault_service=fault_service,
                 fault_type=fault_type,
-                difficulty=difficulty,
+                difficulty=case_difficulty,
                 reference_services=reference_services,
             )
         )
@@ -177,7 +177,7 @@ def generate_combined_dataset(
 
         # Some load cases get empty context (simulating unscheduled load
         # spikes with no calendar entry) to prevent label leakage. Rate is
-        # controlled by difficulty ("hard" mode raises it to 50%).
+        # controlled by difficulty mode (50% for moderate, 75% for hard).
         if rng.random() < _empty_context_rate:
             context = {}
         # Counterfactual baseline: same seed, no load injection
